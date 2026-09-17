@@ -35,7 +35,7 @@ Start/Stop toggles COM1/COM2 detail; Reset shows NAV1/NAV2 (ident and DME distan
 ## Stage 2 - Beyond ATC log
 Only when the user runs Beyond ATC. BATC writes a text log under the user profile; the community
 [AtcLogWatcher](https://github.com/fearlessfrog/AtcLogWatcher) tails it and calls this "a hack, not a supported
-interface". Do the same: `comms_batc.py` tails the file, parses `[time] SPEAKER: text` lines, and pushes the last
+interface". Do the same: `x52_simconnect/comms_batc.py` tails the file, parses `[time] SPEAKER: text` lines, and pushes the last
 N exchanges into the app. Word-wrap a message into 16-char lines and let Start/Stop and Reset page through it;
 line 1 = who (`ATC` / `ME`), lines 2-3 = text, auto-advancing every 2.5 s with a `1/4` counter.
 Config: `--batc-log PATH`, default the location AtcLogWatcher assumes. Must fail soft: no file, no stage 2.
@@ -47,7 +47,7 @@ Separate project. Sketch so the effort is understood:
    packages).
 2. It cannot open sockets itself; the usual bridge is a local HTTP/WebSocket server the panel polls or connects to
    (in-game panels can `fetch` localhost), or a SimConnect client-data area written from a WASM module.
-3. `mfd_sim.py` reads from that server. Same display as stage 2.
+3. The bridge reads from that server. Same display as stage 2.
 Risks: the Coherent interface is undocumented and changes with sim updates; in-game panels only run while the
 toolbar panel is loaded. Decide after stages 1 and 2 whether it is worth it.
 

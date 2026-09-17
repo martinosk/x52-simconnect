@@ -1,7 +1,8 @@
-# Experiment 2 - specs index
+# Feature specs
 
-One file per feature in `specs/`, written so an AI agent can pick any of them up cold. Before starting one:
-read `CLAUDE.md`, the `x52-mfd` and `msfs-simconnect` skills, `README.md`, and the spec's "Depends on" line.
+One file per feature in `specs/`, written so an AI agent or a contributor can pick any of them up cold. Before
+starting one: read `CLAUDE.md`, the `x52-mfd` and `msfs-simconnect` skills, `README.md`, and the spec's "Depends
+on" line. Each spec lists its offline tests; put them in `tests/` next to the existing ones.
 
 | # | Spec | What | Depends on | Effort |
 |---|---|---|---|---|
@@ -15,8 +16,12 @@ Suggested order: 01 -> 02 -> 03 -> 04 -> 05 (the ATC-text part of 05 is optional
 in-sim addon).
 
 ## Shared TODOs
-- [ ] `Display` object (page, banner, forced redraw, current mode) extracted from `main()` in `mfd_sim.py`; 01 does this, everything else builds on it.
-- [ ] Shared template renderer (`{VAR:fmt}`, `{VAR|filter}`); 03 builds it, 04 and 02 reuse it.
-- [ ] `SimFeed` extensions: custom `(name, unit)` datums not in Python-SimConnect's table, and STRING256 datums (05 wants `COM ACTIVE FREQ IDENT`, 03 wants `TITLE`).
-- [ ] Windows autostart: launch `mfd_sim.py` when MSFS starts (a tray app that waits for the process, or a shortcut next to the sim launcher).
+- [ ] `Display` object (MFD, banner, forced redraw, current mode) extracted from `run()` in
+      `x52_simconnect/bridge.py`; the `Pager` there is the first piece. 01 does this, everything else builds on it.
+- [ ] Shared template renderer (`{VAR:fmt}`, `{VAR|filter}`) over `x52_simconnect/formatting.py`; 03 builds it,
+      04 and 02 reuse it.
+- [ ] `SimFeed` extensions: custom `(name, unit)` datums not in Python-SimConnect's table, and STRING256 datums
+      (05 wants `COM ACTIVE FREQ IDENT`, 03 wants `TITLE`).
+- [ ] Windows autostart: launch the bridge when MSFS starts (a tray app that waits for the process, or a shortcut
+      next to the sim launcher).
 - [ ] Longer term: replace libusb-win32 with Logitech's own `SaiK075C` IOCTLs (see `x52-mfd` skill).

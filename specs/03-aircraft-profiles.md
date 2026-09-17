@@ -29,11 +29,11 @@ are chosen automatically from the loaded aircraft and are defined in a config fi
             "FUEL {FUEL_TOTAL_QUANTITY_WEIGHT:6.0f} LB"]
    ```
 2. **Template mini-language.** `{VAR}`, `{VAR:fmt}` (Python format spec), `{VAR|filter}`, `{VAR|filter:arg}`.
-   Filters are the existing helpers: `hdg` (radians to 000), `deg`, `freq` (07.3f), `bcd` (transponder),
+   Filters are the existing helpers in `x52_simconnect/formatting.py`: `hdg` (radians to 000), `deg`, `freq` (07.3f), `bcd` (transponder),
    `signedN`, `onoff:LABEL`, `latN`/`lonE`. Implement with a `string.Formatter` subclass: `get_value` looks up the
-   feed dict through `_num`, `format_field` applies filters. Indexed vars keep their `:1` suffix, so parse
+   feed dict through `num`, `format_field` applies filters. Indexed vars keep their `:1` suffix, so parse
    `NAME(:index)?` before the format spec: `{TURB_ENG_N1:1:5.1f}` -> var `TURB_ENG_N1:1`, spec `5.1f`.
-   Every rendered line is clipped to 16 chars; missing values render as 0 via `_num`.
+   Every rendered line is clipped to 16 chars; missing values render as 0 via `num`.
 3. **Aircraft title.** `SimFeed` is FLOAT64-only today. Two options; (a) is fine for v1:
    (a) poll `TITLE` with the one-shot API every 10 s (`AircraftRequests(sm).get("TITLE")`, ~100 ms, negligible), or
    (b) extend `SimFeed` with STRING256 datums (shared TODO; 05 needs it too).
@@ -45,7 +45,8 @@ are chosen automatically from the loaded aircraft and are defined in a config fi
 5. **Hot reload.** Check `pages.toml` mtime every 2 s; on change, reload, revalidate, and only swap in if valid.
    Show `PAGES RELOADED` / `PAGES INVALID` as a banner.
 6. **Migration.** Move the five current pages into `pages.toml` as the `default` profile; delete the Python
-   page functions once the rendered output matches byte for byte (write the comparison test first).
+   page functions in `x52_simconnect/pages.py` once the rendered output matches byte for byte (the known
+   renderings in `tests/test_pages.py` are the comparison; extend them first).
 
 ## Acceptance criteria
 - [ ] `pages.toml` replaces the hard-coded pages; rendered output for the C152 is identical to today's.

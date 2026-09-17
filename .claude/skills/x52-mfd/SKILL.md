@@ -5,9 +5,10 @@ description: Drive the MFD, brightness and clocks of a Saitek/Logitech X52 (non-
 
 # X52 (non-Pro) MFD from Python on Windows
 
-Working implementation: the repo root (`x52_mfd.py` driver incl. clock/date/brightness, `x52_buttons.py`
-HID reader, `sim_feed.py` streaming SimConnect feed, `mfd_sim.py` bridge). Read those before writing new code;
-extend them rather than duplicating. `SPECS.md` there holds the specs for the next features.
+Working implementation in the `x52_simconnect` package: `mfd.py` driver incl. clock/date/brightness,
+`buttons.py` HID reader, `sim_feed.py` streaming SimConnect feed, `bridge.py` main loop. Read those before
+writing new code; extend them rather than duplicating. `tests/test_mfd.py` and `tests/test_buttons.py` show how
+to test against a fake device. `SPECS.md` holds the specs for the next features.
 
 ## 1. Identify the stick first. Everything depends on it.
 
@@ -80,7 +81,7 @@ HID node : hidgamepad > SaiK075C (Logitech "programming driver", upper filter) >
    ```
 4. Undo: `install-filter.exe uninstall --device=USB\VID_06A3&PID_075C` or uninstall LibUSB-Win32. HID input is untouched either way.
 
-Python deps: `pip install --user pyusb hidapi` (`libusb` pip package only for the negative libusb1 test).
+Python deps: `pip install -e .` from the repo root (the `libusb` pip package only for the negative libusb1 test).
 
 ## 5. Reading the MFD buttons (paging) without stealing the joystick
 
@@ -105,8 +106,9 @@ stopwatch view; Start/Stop and Reset drive that stopwatch. Consequences for any 
 ## 6. Quick commands
 
 ```
-python x52_mfd.py libusb0 "line 1" "line 2" "line 3"
-python x52_buttons.py         # prints presses; Ctrl-C to stop (no --help)
-python mfd_sim.py --demo --cycle 3
+python -m x52_simconnect.mfd libusb0 "line 1" "line 2" "line 3"
+python -m x52_simconnect.buttons        # prints presses and the mode; Ctrl-C to stop (no --help)
+python -m x52_simconnect --demo --cycle 3
 ```
-`X52 (06A3:075C) not found via this backend` means the filter is not in the live stack: see step 4.2.
+`X52 (06A3:075C) not found; is the libusb0 filter installed and loaded?` means the filter is not in the live
+stack: see step 4.2. The bridge is a foreground loop; when running it from a script or agent, give it a timeout.

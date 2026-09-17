@@ -5,13 +5,16 @@ description: Read and write MSFS 2024 flight data from Python with the Python-Si
 
 # MSFS 2024 via Python-SimConnect
 
-Working implementation: `mfd_sim.py` (`SimSource` class). Reuse it.
+Working implementation: `x52_simconnect/sim_feed.py` (`SimFeed`, the streaming feed) and
+`x52_simconnect/sources.py` (`SimSource`, reconnect logic). Reuse them; `tests/test_sim_feed.py` shows how to
+test packet handling and reconnects without the sim.
 
-## Environment facts (this machine)
-- MSFS 2024 is the Store build (package `Microsoft.Limitless_8wekyb3d8bbwe`). No MSFS SDK is installed, so there is no
+## Environment facts (verified setup)
+- MSFS 2024 Store build (package `Microsoft.Limitless_8wekyb3d8bbwe`). No MSFS SDK is installed, so there is no
   `SimConnect.h`/`.lib`; the Python package ships its own `SimConnect.dll` and it opens MSFS 2024 fine.
-- `pip install --user SimConnect` gives Python-SimConnect 0.4.26 (ctypes wrapper). Works on Python 3.14 64-bit.
-- `hidapi`, `pyusb` are installed for the joystick side, see the `x52-mfd` skill.
+- The `SimConnect` pip package is Python-SimConnect 0.4.26 (ctypes wrapper). Works on Python 3.14 64-bit. It
+  imports `ctypes.wintypes`, so it only imports on Windows; tests that touch it use `pytest.importorskip`.
+- `hidapi`, `pyusb` cover the joystick side, see the `x52-mfd` skill.
 
 ## Connecting, and the trap in the constructor
 ```python
@@ -36,7 +39,7 @@ a bytes string for string vars, or `None` when no data. Unknown names return `No
 Cost: each `get` is a one-shot `RequestDataOnSimObjectType` followed by up to 10 x 10 ms waits. Budget roughly
 10-100 ms per variable per refresh once the cache (`_time`) expires. Fine for a handful of values; not for a display.
 
-## Streaming instead of polling (preferred): `sim_feed.py`
+## Streaming instead of polling (preferred): `x52_simconnect/sim_feed.py`
 One data definition with every variable, pushed by the sim; reading is a dict lookup. Verified live: 31 vars,
 ~13 packets/s, zero polling. Reuse `SimFeed`, or copy the pattern:
 - Subclass `SimConnect` and override `my_dispatch_proc`: the package ignores `SIMCONNECT_RECV_ID_SIMOBJECT_DATA`
@@ -79,6 +82,7 @@ Always wrap values in a tolerant `float()` (None -> default) before formatting; 
   plain SimConnect; that needs a WASM module such as WASimCommander.
 
 ## Testing without the sim
-- Keep a `DemoSource` with the same `read(names)` interface and plausible moving values (see `mfd_sim.py`).
-- Verify every formatter with all-`None` input as well as demo data.
+- Keep `DemoSource` (`x52_simconnect/sources.py`) in step with the pages: every SimVar a page uses must be in
+  `demo_values`; `tests/test_pages.py` checks that and renders every page with demo data and with all `None`.
+- New formatters go in `x52_simconnect/formatting.py` with a test for `None` input.
 - Run the real path with the sim down to check the retry loop stays quiet and does not spin.

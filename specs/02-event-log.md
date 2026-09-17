@@ -42,18 +42,18 @@ map the event with `MapClientEventToSimEvent`, add it to a notification group wi
 `AddClientEventToNotificationGroup(..., bMaskable=False)`, set the group priority, and it arrives as
 `SIMCONNECT_RECV_ID_EVENT` with `uEventID`. Python-SimConnect binds all of these (`Attributes.py`) and its
 dispatch routes `RECV_ID_EVENT` to `handle_id_event`, which only knows its own four ids; extend the hooked
-subclass in `sim_feed.py` to look up ours first.
+subclass in `x52_simconnect/sim_feed.py` to look up ours first.
 - Subscribe to discrete events only: `FLAPS_INCR/DECR/UP/DOWN`, `GEAR_TOGGLE/UP/DOWN`, `PARKING_BRAKES`,
   `ELEV_TRIM_UP/DN`, `SPOILERS_TOGGLE`, `AP_*` toggles, `TOGGLE_*_LIGHTS`, `PITOT_HEAT_TOGGLE`,
   `TOGGLE_MASTER_BATTERY`, `COM_STBY_RADIO_SWAP`. Never `AXIS_*` or `*_SET` events: they fire every frame.
 - Log as `EV FLAPS_INCR` only when source A does not produce a line within 0.3 s (so a key press that changes
   nothing, e.g. FLAPS_INCR at full flaps, still shows up, but normal actions are not logged twice).
-- This is the same plumbing spec 04 needs to *send* events; share the module (`sim_events.py`).
+- This is the same plumbing spec 04 needs to *send* events; share the module (`x52_simconnect/sim_events.py`).
 
 ## Design
 1. `EventLogApp(App)`: `vars` = union of the table above; `render` = three visible entries from a deque of
    (timestamp, text), starting at `scroll`; age column is recomputed every tick (`  3s`, ` 41s`, `12m`).
-2. Rule engine in `event_rules.py`: pure functions over (previous values, current values, now) -> list of lines.
+2. Rule engine in `x52_simconnect/event_rules.py`: pure functions over (previous values, current values, now) -> list of lines.
    Unit-testable with dicts, no sim.
 3. History: 100 entries. Start/Stop = older, Reset = newer, Reset held 1 s = jump to newest. New entries while
    scrolled do not move the view; a `+3 NEW` marker replaces the age column on line 1 instead.
@@ -72,7 +72,7 @@ subclass in `sim_feed.py` to look up ours first.
 - [ ] No extra SimConnect round trips: everything comes from the streaming feed and event notifications.
 
 ## Steps
-1. `event_rules.py` + tests (no sim).
+1. `event_rules.py` + `tests/test_event_rules.py` (no sim).
 2. `EventLogApp` with source A, demo timeline.
 3. `sim_events.py` notification subscription, dispatch hook, dedupe against A.
 4. Scrolling, banner mirror option, README.

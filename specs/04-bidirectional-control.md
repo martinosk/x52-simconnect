@@ -1,14 +1,14 @@
 # Spec 04 - Bidirectional control: stick buttons trigger sim actions
 
 **Depends on:** 01 (mode = binding layer, `Display` for feedback), 03 (template renderer for feedback text).
-**Shares:** `sim_events.py` with 02 (same mapping/notification plumbing, used here to *send*).
+**Shares:** `x52_simconnect/sim_events.py` with 02 (same mapping/notification plumbing, used here to *send*).
 
 ## Goal
 Press a button on the X52 and something happens in the sim (autopilot master, heading bug, COM swap, ...),
 with immediate feedback on the MFD. The stick becomes a small control panel, not only a display.
 
 ## Design
-1. **`sim_events.py`**: `SimEvents(sm)` wrapping `SimConnect_MapClientEventToSimEvent` and
+1. **`x52_simconnect/sim_events.py`**: `SimEvents(sm)` wrapping `SimConnect_MapClientEventToSimEvent` and
    `SimConnect_TransmitClientEvent`. Python-SimConnect already exposes both: `sm.map_to_sim_event(b"AP_MASTER")`
    returns an event id, `sm.send_event(evt, DWORD(data))` fires it. Map lazily, cache per name. `SimFeed` owns
    the `sm` object; expose it (`feed.sm`) so events share the connection.
@@ -43,7 +43,7 @@ with immediate feedback on the MFD. The stick becomes a small control panel, not
    feedback = "COM1 {COM_ACTIVE_FREQUENCY:1|freq}"
    ```
    v1 is parameterless events only; `value = 5000` for `*_SET` events comes later.
-3. **Button handling.** `ButtonReader` edge-detects presses and keeps `state` (held buttons). Add hold-to-repeat:
+3. **Button handling.** `x52_simconnect.buttons.ButtonReader` edge-detects presses and keeps `state` (held buttons). Add hold-to-repeat:
    while a `repeat = true` binding's button stays down, fire again at `repeat_hz` after `repeat_after_ms`.
    Start/Stop and Reset stay reserved for the active app unless a binding explicitly claims them.
 4. **Feedback.** `display.banner(rendered feedback)`. Because the feed streams, the value shown is the post-event

@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "x52-simconnect"
+version = "0.1.0"
+description = "MSFS 2024 flight data on the MFD of a Saitek/Logitech X52 (non-Pro) via SimConnect"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["msfs", "simconnect", "x52", "saitek", "logitech", "mfd", "flight-simulator"]
+classifiers = [
+    "Environment :: Win32 (MS Windows)",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Topic :: Games/Entertainment :: Simulation",
+]
+dependencies = [
+    "pyusb>=1.2",
+    "SimConnect>=0.4.26",
+    "hidapi>=0.14",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.5"]
+# Only needed to reproduce the negative libusb-1.0 test described in x52_simconnect/mfd.py:
+libusb1 = ["libusb"]
+
+[project.scripts]
+x52-simconnect = "x52_simconnect.bridge:main"
+
+[tool.setuptools]
+packages = ["x52_simconnect"]
+
+[tool.ruff]
+line-length = 120
+extend-exclude = ["*.md"]
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "BLE", "SIM"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

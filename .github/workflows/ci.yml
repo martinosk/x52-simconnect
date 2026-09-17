@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    # Windows only: the SimConnect package imports ctypes.wintypes, and Windows is the target platform.
+    # No stick or sim is needed; the tests run against fakes.
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: python -m pip install -e .[dev]
+      - run: python -m ruff check .
+      - run: python -m ruff format --check .
+      - run: python -m pytest

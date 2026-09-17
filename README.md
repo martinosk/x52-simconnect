@@ -38,7 +38,8 @@ If you own an X52 **Pro**, use a DirectOutput-based tool instead, e.g.
 
 ## Setup
 ```
-pip install -r requirements.txt
+git clone <this repo> && cd x52-simconnect
+pip install -e .
 ```
 Install the libusb-win32 filter (once):
 1. Download `libusb-win32-devel-filter-1.2.7.3.exe` from the
@@ -55,16 +56,24 @@ Install the libusb-win32 filter (once):
 
 ## Run
 ```
-python mfd_sim.py                 # waits for MSFS, then shows live data
-python mfd_sim.py --demo          # fake data, no sim needed
-python mfd_sim.py --cycle 5       # auto-advance pages
-python mfd_sim.py --no-clock --no-auto-brightness
-python mfd_sim.py --next MOUSE_SCROLL_UP --prev MOUSE_SCROLL_DN   # remap paging; --list-buttons for names
-python x52_mfd.py libusb0 "line 1" "line 2" "line 3"              # raw write
-python x52_buttons.py             # print button presses (Ctrl-C to stop)
-python sim_feed.py ZULU_TIME LOCAL_TIME                           # watch the streaming feed
+python -m x52_simconnect                  # waits for MSFS, then shows live data
+python -m x52_simconnect --demo           # fake data, no sim needed
+python -m x52_simconnect --cycle 5        # auto-advance pages
+python -m x52_simconnect --no-clock --no-auto-brightness
+python -m x52_simconnect --next MOUSE_SCROLL_UP --prev MOUSE_SCROLL_DN   # remap paging; --list-buttons for names
+python -m x52_simconnect --help
 ```
+`pip install -e .` also installs an `x52-simconnect` command with the same options (in your Python `Scripts`
+directory, which may not be on PATH).
+
 Default buttons: **Start/Stop** = next page, **Reset** = previous page. A `P2/5 RADIO` banner flashes on each change.
+
+Hardware and sim diagnostics, each a small standalone tool:
+```
+python -m x52_simconnect.mfd libusb0 "line 1" "line 2" "line 3"   # raw write to the display
+python -m x52_simconnect.buttons                                  # print button presses (Ctrl-C to stop)
+python -m x52_simconnect.sim_feed ZULU_TIME LOCAL_TIME            # watch the streaming feed for 3 s
+```
 
 ### The MFD buttons are also handled by the stick firmware
 Function cycles the firmware clock 1/2/3 (it draws a `1`..`3` under our text) and toggles the stopwatch view;
@@ -72,15 +81,33 @@ Start/Stop and Reset drive that stopwatch. This cannot be turned off over USB, s
 and the display is force-redrawn 0.3 s after any of these buttons to overwrite whatever the firmware drew.
 
 ## How it works
-- `x52_mfd.py` - MFD driver: vendor request `0x91` with line, clear, brightness, clock, date, shift and blink
-  commands (protocol documented in the file). Writes are cached; transient USB errors are retried and the device
-  is reopened after repeated failures.
-- `sim_feed.py` - one SimConnect data definition with every SimVar, pushed every 6th visual frame. Hooks the
-  dispatch of the `SimConnect` Python package, which otherwise ignores bulk data packets.
-- `x52_buttons.py` - shared-mode HID reader for all 34 buttons and the mode selector (layout from libx52io).
-- `mfd_sim.py` - the bridge: pages, paging, clock sync, brightness, demo mode, reconnect logic.
-- `.claude/skills/` - knowledge captured for AI coding agents (protocol, driver stack, SimConnect quirks).
-  `CLAUDE.md` points at them.
+Hardware and sim I/O live in three modules; everything else is plain Python that runs without either.
+
+| Module (`x52_simconnect/`) | Role | Needs |
+|---|---|---|
+| `mfd.py` | MFD driver: vendor request `0x91` with line, clear, brightness, clock, date, shift and blink commands. Writes are cached; transient USB errors are retried and the device is reopened after repeated failures. | stick |
+| `buttons.py` | Shared-mode HID reader for all 34 buttons and the mode selector (layout from libx52io). | stick |
+| `sim_feed.py` | One SimConnect data definition with every SimVar, pushed every 6th visual frame. Hooks the dispatch of the `SimConnect` package, which otherwise ignores bulk data packets. | sim |
+| `formatting.py` | SimVar value -> display text helpers; all tolerate `None`. | - |
+| `pages.py` | The five pages: their SimVars and 16-character renderings. | - |
+| `clock_sync.py` | Firmware clock/date and brightness from sim time. | - |
+| `sources.py` | `SimSource` (live, with reconnect) and `DemoSource` (fake data) behind one `ensure`/`read`/`close` interface. | - |
+| `bridge.py` | CLI, paging and the main loop. | - |
+
+`.claude/skills/` holds the hardware and SimConnect knowledge captured for AI coding agents; `CLAUDE.md` points at it.
+
+## Development
+```
+pip install -e .[dev]
+python -m pytest              # unit tests: fakes for the stick and the feed, no hardware or sim needed
+python -m ruff check . && python -m ruff format .
+```
+The tests cover the formatters, every page with demo and all-`None` data, clock and date encoding, the USB
+retry and caching logic, HID decoding and edge detection, paging, CLI validation and the feed's packet parsing.
+CI runs the same on Windows for each push and pull request. Changes to `mfd.py`, `buttons.py` or `sim_feed.py` still
+need a check on the real stick or a live flight; `--demo` is the quickest hardware-only check.
+
+New features are written up as specs first, see [SPECS.md](SPECS.md).
 
 ## Known limits
 - USB control transfers to the stick fail sporadically with Windows error 31 ("A device attached to the system is
@@ -96,6 +123,9 @@ and the display is force-redrawn 0.3 s after any of these buttons to overwrite w
 "C:\Program Files\LibUSB-Win32\bin\install-filter.exe" uninstall --device=USB\VID_06A3&PID_075C
 ```
 or remove LibUSB-Win32 from Apps & features. Joystick input goes through HidUsb either way and is unaffected.
+
+## License
+MIT, see [LICENSE](LICENSE).
 
 ## Credits
 - [nirenjan/libx52](https://github.com/nirenjan/libx52) for the reverse-engineered protocol and HID layout.
