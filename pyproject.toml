@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "MSFS 2024 flight data on the MFD of a Saitek/Logitech X52 (non-Pro) via SimConnect"
 readme = "README.md"
 requires-python = ">=3.11"
-license = "MIT"
+license = "AGPL-3.0-or-later"
 license-files = ["LICENSE"]
 keywords = ["msfs", "simconnect", "x52", "saitek", "logitech", "mfd", "flight-simulator"]
 classifiers = [

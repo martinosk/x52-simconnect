@@ -125,7 +125,10 @@ New features are written up as specs first, see [SPECS.md](SPECS.md).
 or remove LibUSB-Win32 from Apps & features. Joystick input goes through HidUsb either way and is unaffected.
 
 ## License
-MIT, see [LICENSE](LICENSE).
+GNU AGPL-3.0-or-later, see [LICENSE](LICENSE). The bridge subclasses the AGPL-licensed
+[Python-SimConnect](https://github.com/odwdinc/Python-SimConnect) package, so the program as a whole is
+copyleft; for a desktop tool that already publishes its source this changes nothing in practice. pyusb and
+hidapi are BSD.
 
 ## Credits
 - [nirenjan/libx52](https://github.com/nirenjan/libx52) for the reverse-engineered protocol and HID layout.
