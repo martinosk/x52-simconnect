@@ -119,10 +119,12 @@ python -m x52_simconnect.sim_feed ZULU_TIME LOCAL_TIME            # watch the st
 python -m x52_simconnect.sim_events                               # print key events as the sim fires them, 30 s
 ```
 
-### The MFD buttons are also handled by the stick firmware
+### The firmware and the Logitech driver also draw on the MFD
 Function cycles the firmware clock 1/2/3 (it draws a `1`..`3` under our text) and toggles the stopwatch view;
-Start/Stop and Reset drive that stopwatch. This cannot be turned off over USB, so Function is unmapped by default
-and the display is force-redrawn 0.3 s after any of these buttons to overwrite whatever the firmware drew.
+Start/Stop and Reset drive that stopwatch. This cannot be turned off over USB, so Function is unmapped by default.
+With Logitech's driver installed, pressing any stick button also writes the button's name on line 2 for as long
+as it is held, and leaves the line blank afterwards, profile or no profile. The bridge force-redraws the display
+0.3 s after every press and release, so the button name shows briefly and our text returns.
 
 ## How it works
 Hardware and sim I/O live in three modules; everything else is plain Python that runs without either.

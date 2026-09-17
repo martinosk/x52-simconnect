@@ -17,8 +17,9 @@ In mode 3, Start/Stop scrolls to older entries, Reset to newer ones, Reset held 
 
 The stick firmware also acts on the three MFD buttons: Function cycles clock 1/2/3 and
 toggles the stopwatch view, Start/Stop and Reset drive the stopwatch. That cannot be
-disabled over USB, so Function is unmapped by default and the display is force-redrawn
-shortly after any of those buttons is pressed to overwrite what the firmware drew.
+disabled over USB, so Function is unmapped by default. Logitech's driver also writes the
+name of any pressed button on MFD line 2 and blanks that line on release. The display is
+therefore force-redrawn shortly after every press and release, to restore what we drew.
 """
 
 import argparse
@@ -29,7 +30,7 @@ from datetime import datetime
 import usb.core
 
 from .apps import ALL_VARS, build_apps
-from .buttons import BUTTON_NAMES, FIRMWARE_BUTTONS, ButtonReader
+from .buttons import BUTTON_NAMES, ButtonReader
 from .clock_sync import ClockSync
 from .display import MODES, Display
 from .mfd import X52Mfd
@@ -67,6 +68,7 @@ class Bridge:
         self.active = self.apps[mode]
         self.active.on_activate()
         self._down.clear()
+        self.display.force_redraw_in()
         self.display.banner(f"MODE {mode} {self.active.name}")
         log.info("mode %d %s", mode, self.active.name)
         return True
@@ -81,16 +83,18 @@ class Bridge:
             self.select_mode(mode)
         for app in self.apps.values():
             app.observe(values, now, events)
+        # The firmware (clock buttons) and Logitech's driver (any button: its name on line 2 while held,
+        # blank after) both draw on the MFD; redraw everything shortly after each press and release.
         for name in presses:
             self._down[name] = now
             self.active.on_button(name)
-            if name in FIRMWARE_BUTTONS:
-                self.display.force_redraw_in()
+            self.display.force_redraw_in()
         for name, since in list(self._down.items()):
             if name in held:
                 self.active.on_hold(name, now - since)
             else:
                 del self._down[name]
+                self.display.force_redraw_in()
         self.active.tick(now)
         lines = self.active.render(values) if values else waiting_screen()
         return self.display.show(lines)

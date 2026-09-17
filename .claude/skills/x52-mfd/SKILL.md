@@ -133,6 +133,12 @@ stopwatch view; Start/Stop and Reset drive that stopwatch. Consequences for any 
 - Force a full redraw of all three lines ~0.3 s after any of these presses to overwrite what the firmware drew.
 - Do not rely on the firmware digits as a page indicator; draw your own (e.g. a short `P2/5 TITLE` banner).
 
+**Logitech's driver writes on the MFD too** (verified 2026-09, driver 8.0.116.0, no profiler process running and
+`IsProfileActive` returning 0): pressing *any* stick button puts the button's name on line 2 for as long as it is
+held, and line 2 is blanked on release. No registry setting for it was found (`Services\SaiK075C` has only a
+`CdoGuid` parameter). The bridge handles it by forcing a full redraw 0.3 s after every press and every release
+(`Bridge.step` sees releases as names dropping out of `held`).
+
 ## 6. Quick commands
 
 ```
