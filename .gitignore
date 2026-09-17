@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+
+# Local/user-specific runtime files
+*.log
+logfile_location.txt
+*.local.toml
+
+# Claude Code local settings (shared skills in .claude/skills are committed)
+.claude/settings.local.json
+
+# Editors and OS
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+.DS_Store

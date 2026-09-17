@@ -1,0 +1,22 @@
+# Experiment 2 - specs index
+
+One file per feature in `specs/`, written so an AI agent can pick any of them up cold. Before starting one:
+read `CLAUDE.md`, the `x52-mfd` and `msfs-simconnect` skills, `README.md`, and the spec's "Depends on" line.
+
+| # | Spec | What | Depends on | Effort |
+|---|---|---|---|---|
+| 01 | [Mode-selector display modes](specs/01-mode-selector.md) | The stick's mode switch (1/2/3) picks which "app" the MFD shows | - | small |
+| 02 | [Event log (mode 3)](specs/02-event-log.md) | Rolling log of what was last triggered: flaps, gear, brake, trim, AP ... | 01 | medium |
+| 03 | [Aircraft profiles](specs/03-aircraft-profiles.md) | Pages per aircraft from `pages.toml` with a template language | - | medium |
+| 04 | [Bidirectional control](specs/04-bidirectional-control.md) | Stick buttons fire sim events, with MFD feedback | 01 (mode as layer), 03 (templates) | medium |
+| 05 | [Comms (mode 2)](specs/05-comms.md) | Tuned station now; ATC text later via BeyondATC log or a toolbar addon | 01 | small, then large |
+
+Suggested order: 01 -> 02 -> 03 -> 04 -> 05 (the ATC-text part of 05 is optional and the only one needing an
+in-sim addon).
+
+## Shared TODOs
+- [ ] `Display` object (page, banner, forced redraw, current mode) extracted from `main()` in `mfd_sim.py`; 01 does this, everything else builds on it.
+- [ ] Shared template renderer (`{VAR:fmt}`, `{VAR|filter}`); 03 builds it, 04 and 02 reuse it.
+- [ ] `SimFeed` extensions: custom `(name, unit)` datums not in Python-SimConnect's table, and STRING256 datums (05 wants `COM ACTIVE FREQ IDENT`, 03 wants `TITLE`).
+- [ ] Windows autostart: launch `mfd_sim.py` when MSFS starts (a tray app that waits for the process, or a shortcut next to the sim launcher).
+- [ ] Longer term: replace libusb-win32 with Logitech's own `SaiK075C` IOCTLs (see `x52-mfd` skill).
