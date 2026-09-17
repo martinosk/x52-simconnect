@@ -58,6 +58,14 @@ def onoff(v, label):
     return label if flag(v) else "-" * len(label)
 
 
+def hms(seconds):
+    """Seconds since midnight (``ZULU_TIME``, ``LOCAL_TIME``) -> ``"12:34:56"``; ``"--:--:--"`` without data."""
+    if seconds is None:
+        return "--:--:--"
+    s = int(num(seconds)) % 86400
+    return f"{s // 3600:02d}:{s // 60 % 60:02d}:{s % 60:02d}"
+
+
 def clip(text):
     """Cut a line to the MFD width."""
     return str(text)[:LINE_LEN]

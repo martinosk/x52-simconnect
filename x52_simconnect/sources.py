@@ -8,7 +8,7 @@ src.close()
 import math
 import time
 
-from .pages import ALL_VARS
+from .apps import ALL_VARS
 
 STALE_SECONDS = 15  # no packet for this long -> drop the connection and retry
 RETRY_SECONDS = 5  # how often to try connecting while the sim is down
@@ -56,7 +56,7 @@ class SimSource:
 
 
 def demo_values(t):
-    """Plausible, slowly moving values for every SimVar the pages use, ``t`` seconds into the demo."""
+    """Plausible, slowly moving values for every SimVar the apps use, ``t`` seconds into the demo."""
     return {
         "AIRSPEED_INDICATED": 118 + 10 * math.sin(t / 5),
         "GROUND_VELOCITY": 124 + 10 * math.sin(t / 5),

@@ -97,11 +97,9 @@ PAGES = (
     ),
 )
 
-# Streamed alongside the page vars so the firmware clock and brightness can follow sim time.
+# Streamed alongside the app vars so the firmware clock and brightness can follow sim time.
+# The full list the feed streams is ``apps.ALL_VARS``.
 CLOCK_VARS = ("ZULU_TIME", "LOCAL_TIME", "ZULU_DAY_OF_MONTH", "ZULU_MONTH_OF_YEAR", "ZULU_YEAR", "TIME_OF_DAY")
-
-# Everything the feed streams, in a stable order and without duplicates.
-ALL_VARS = tuple(dict.fromkeys([n for p in PAGES for n in p.vars] + list(CLOCK_VARS)))
 
 
 def render(page, values):

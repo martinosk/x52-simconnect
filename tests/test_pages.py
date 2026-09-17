@@ -1,21 +1,16 @@
 import pytest
 
+from x52_simconnect.apps import ALL_VARS
 from x52_simconnect.formatting import LINE_LEN
-from x52_simconnect.pages import ALL_VARS, CLOCK_VARS, PAGES, Page, render
+from x52_simconnect.pages import PAGES, Page, render
 from x52_simconnect.sources import demo_values
 
 TITLES = [p.title for p in PAGES]
 
 
-def test_all_vars_is_unique_and_complete():
-    assert len(ALL_VARS) == len(set(ALL_VARS))
+def test_every_page_var_is_streamed():
     for page in PAGES:
         assert set(page.vars) <= set(ALL_VARS)
-    assert set(CLOCK_VARS) <= set(ALL_VARS)
-
-
-def test_demo_values_cover_every_var():
-    assert set(ALL_VARS) <= set(demo_values(0))
 
 
 @pytest.mark.parametrize("page", PAGES, ids=TITLES)

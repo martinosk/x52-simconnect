@@ -16,8 +16,8 @@ Suggested order: 01 -> 02 -> 03 -> 04 -> 05 (the ATC-text part of 05 is optional
 in-sim addon).
 
 ## Shared TODOs
-- [ ] `Display` object (MFD, banner, forced redraw, current mode) extracted from `run()` in
-      `x52_simconnect/bridge.py`; the `Pager` there is the first piece. 01 does this, everything else builds on it.
+- [x] `Display` object (MFD, banner, forced redraw, current mode) in `x52_simconnect/display.py`, `App`
+      protocol and `PagesApp` in `x52_simconnect/apps.py`. Done in 01, everything else builds on it.
 - [ ] Shared template renderer (`{VAR:fmt}`, `{VAR|filter}`) over `x52_simconnect/formatting.py`; 03 builds it,
       04 and 02 reuse it.
 - [ ] `SimFeed` extensions: custom `(name, unit)` datums not in Python-SimConnect's table, and STRING256 datums

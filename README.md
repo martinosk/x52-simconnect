@@ -26,9 +26,10 @@ If you own an X52 **Pro**, use a DirectOutput-based tool instead, e.g.
 | Live flight data via SimConnect, streaming (one data definition, ~13 packets/s, no polling) | Working, verified in MSFS 2024 |
 | Five pages: FLIGHT, RADIO, AUTOPILOT, ENGINE, POSITION | Working |
 | Paging with the MFD buttons, page banner | Working |
+| Mode selector 1/2/3 picks the app on the MFD (pages, comms, event log) | Working; modes 2 and 3 are placeholders until specs 05 and 02 |
 | Firmware clock 1/2/3, date and MFD/LED brightness from sim time | Working |
 | Auto-reconnect when the sim starts/stops; recovery from transient USB errors | Working |
-| Mode-selector apps, event log, comms, aircraft profiles, buttons -> sim events | Specified, see [SPECS.md](SPECS.md) |
+| Event log, comms, aircraft profiles, buttons -> sim events | Specified, see [SPECS.md](SPECS.md) |
 
 ## Requirements
 - Windows 10/11, Python 3.11+ (developed on 3.14), MSFS 2024 or 2020 (any edition; the Store build works).
@@ -59,6 +60,7 @@ Install the libusb-win32 filter (once):
 python -m x52_simconnect                  # waits for MSFS, then shows live data
 python -m x52_simconnect --demo           # fake data, no sim needed
 python -m x52_simconnect --cycle 5        # auto-advance pages
+python -m x52_simconnect --mode 3         # force a mode, ignore the stick's selector
 python -m x52_simconnect --no-clock --no-auto-brightness
 python -m x52_simconnect --next MOUSE_SCROLL_UP --prev MOUSE_SCROLL_DN   # remap paging; --list-buttons for names
 python -m x52_simconnect --help
@@ -66,7 +68,24 @@ python -m x52_simconnect --help
 `pip install -e .` also installs an `x52-simconnect` command with the same options (in your Python `Scripts`
 directory, which may not be on PATH).
 
-Default buttons: **Start/Stop** = next page, **Reset** = previous page. A `P2/5 RADIO` banner flashes on each change.
+### Modes
+The rotary mode selector on the stick picks which "app" the MFD shows. Each app keeps its own state (current
+page, scroll position) while another one is showing, and a `MODE 2 COMMS` banner flashes on each change.
+
+| Selector | App | Shows |
+|---|---|---|
+| 1 | Pages | The data pages: FLIGHT, RADIO, AUTOPILOT, ENGINE, POSITION |
+| 2 | Comms | Tuned station and ATC text, spec 05. Placeholder for now |
+| 3 | Events | The last things triggered in the cockpit, spec 02. Placeholder for now |
+
+`--mode N` forces one app for testing, ignoring the selector. Until the stick sends its first report (any input
+change) the selector position is unknown and mode 1 is assumed.
+
+MSFS sees the three selector positions as joystick buttons too. They are unbound in the stock X52 profile; if you
+bind them, both the sim and the bridge react to the same turn. The bridge does not try to prevent that.
+
+Default buttons in mode 1: **Start/Stop** = next page, **Reset** = previous page. A `P2/5 RADIO` banner flashes on
+each change. Start/Stop and Reset keep their own meaning inside each app.
 
 Hardware and sim diagnostics, each a small standalone tool:
 ```
@@ -90,9 +109,11 @@ Hardware and sim I/O live in three modules; everything else is plain Python that
 | `sim_feed.py` | One SimConnect data definition with every SimVar, pushed every 6th visual frame. Hooks the dispatch of the `SimConnect` package, which otherwise ignores bulk data packets. | sim |
 | `formatting.py` | SimVar value -> display text helpers; all tolerate `None`. | - |
 | `pages.py` | The five pages: their SimVars and 16-character renderings. | - |
+| `apps.py` | One app per selector position (`PagesApp`, placeholder `CommsApp` and `EventLogApp`) behind one `App` protocol; `ALL_VARS`, the union of what they need. | - |
+| `display.py` | `Display`: the one writer of MFD text, with the banner, the forced redraw and the current mode. | - |
 | `clock_sync.py` | Firmware clock/date and brightness from sim time. | - |
 | `sources.py` | `SimSource` (live, with reconnect) and `DemoSource` (fake data) behind one `ensure`/`read`/`close` interface. | - |
-| `bridge.py` | CLI, paging and the main loop. | - |
+| `bridge.py` | CLI and the main loop; `Bridge.step` is its pure body (mode switching, button routing, rendering). | - |
 
 `.claude/skills/` holds the hardware and SimConnect knowledge captured for AI coding agents; `CLAUDE.md` points at it.
 
@@ -102,8 +123,9 @@ pip install -e .[dev]
 python -m pytest              # unit tests: fakes for the stick and the feed, no hardware or sim needed
 python -m ruff check . && python -m ruff format .
 ```
-The tests cover the formatters, every page with demo and all-`None` data, clock and date encoding, the USB
-retry and caching logic, HID decoding and edge detection, paging, CLI validation and the feed's packet parsing.
+The tests cover the formatters, every page and app with demo and all-`None` data, clock and date encoding, the
+USB retry and caching logic, HID decoding and edge detection, the display's banner and redraw timing, paging,
+mode switching with a scripted selector, CLI validation and the feed's packet parsing.
 CI runs the same on Windows for each push and pull request. Changes to `mfd.py`, `buttons.py` or `sim_feed.py` still
 need a check on the real stick or a live flight; `--demo` is the quickest hardware-only check.
 

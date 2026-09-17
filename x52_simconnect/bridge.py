@@ -5,9 +5,13 @@ MSFS 2024 -> X52 (non-Pro) MFD bridge: the CLI and the main loop.
   python -m x52_simconnect --demo         # fake flight data, no sim needed
   python -m x52_simconnect --page 2       # start on a given page
   python -m x52_simconnect --cycle 5      # auto-advance pages every 5 s
+  python -m x52_simconnect --mode 3       # force a mode, ignoring the stick's selector
 
-Paging (defaults): Start/Stop = next page, Reset = previous page. A "P2/5 RADIO" banner
-flashes on each change. Remap with --next/--prev/--home (see --list-buttons).
+The rotary mode selector on the stick picks the app on the MFD: 1 = data pages, 2 = comms,
+3 = event log (see apps.py). A "MODE 2 COMMS" banner flashes on each change.
+
+Paging in mode 1 (defaults): Start/Stop = next page, Reset = previous page. A "P2/5 RADIO"
+banner flashes on each change. Remap with --next/--prev/--home (see --list-buttons).
 
 The stick firmware also acts on the three MFD buttons: Function cycles clock 1/2/3 and
 toggles the stopwatch view, Start/Stop and Reset drive the stopwatch. That cannot be
@@ -22,48 +26,17 @@ from datetime import datetime
 
 import usb.core
 
+from .apps import ALL_VARS, build_apps
 from .buttons import BUTTON_NAMES, FIRMWARE_BUTTONS, ButtonReader
 from .clock_sync import ClockSync
-from .formatting import clip
+from .display import MODES, Display
 from .mfd import X52Mfd
-from .pages import CLOCK_VARS, PAGES, render
 from .sources import DemoSource, SimSource
 
 POLL_HZ = 4
-BANNER_SECONDS = 0.8  # how long "P2/5 RADIO" is shown after a page change
-REDRAW_DELAY = 0.3  # forced full redraw this long after a firmware-handled button press
 USB_FAILURES_BEFORE_REOPEN = 3
 
-
-class Pager:
-    """Current page index plus the short banner shown after a change. Pure; ``now`` is passed in."""
-
-    def __init__(self, count, start=0, banner_seconds=BANNER_SECONDS):
-        self.count = count
-        self.page = start % count
-        self.banner_seconds = banner_seconds
-        self.banner_until = 0.0
-
-    def goto(self, index, now):
-        """Switch to ``index`` (wrapped). Returns True when the page actually changed."""
-        index %= self.count
-        if index == self.page:
-            return False
-        self.page = index
-        self.banner_until = now + self.banner_seconds
-        return True
-
-    def next(self, now):
-        return self.goto(self.page + 1, now)
-
-    def prev(self, now):
-        return self.goto(self.page - 1, now)
-
-    def banner(self, now):
-        """The banner text while it is due, else None."""
-        if now < self.banner_until:
-            return clip(f"P{self.page + 1}/{self.count} {PAGES[self.page].title}")
-        return None
+log = logging.getLogger(__name__)
 
 
 def waiting_screen(now=None):
@@ -71,18 +44,55 @@ def waiting_screen(now=None):
     return ["MSFS 2024", "waiting for sim", now.strftime("%H:%M:%S")]
 
 
+class Bridge:
+    """The pure part of the main loop: mode switching, button routing, rendering through the ``Display``.
+
+    ``run()`` wraps it with the stick, the feed and error recovery; the tests drive ``step`` directly."""
+
+    def __init__(self, display, apps, forced_mode=None):
+        self.display = display
+        self.apps = apps
+        self.forced_mode = forced_mode
+        self.active = apps[display.mode]
+
+    def select_mode(self, mode):
+        """Switch to ``mode`` if it differs: activate its app and flash a ``MODE n NAME`` banner."""
+        if not self.display.set_mode(mode):
+            return False
+        self.active = self.apps[mode]
+        self.active.on_activate()
+        self.display.banner(f"MODE {mode} {self.active.name}")
+        log.info("mode %d %s", mode, self.active.name)
+        return True
+
+    def step(self, presses=(), stick_mode=None, values=None, now=None):
+        """One loop tick. ``stick_mode`` is the selector as the reader saw it (None before the first report,
+        which means "leave it"); ``values`` None means no sim data yet. Returns the lines written."""
+        now = self.display.tick(now)
+        mode = self.forced_mode or stick_mode
+        if mode is not None:
+            self.select_mode(mode)
+        for name in presses:
+            self.active.on_button(name)
+            if name in FIRMWARE_BUTTONS:
+                self.display.force_redraw_in()
+        self.active.tick(now)
+        lines = self.active.render(values) if values else waiting_screen()
+        return self.display.show(lines)
+
+
 def build_parser():
     ap = argparse.ArgumentParser(
         prog="python -m x52_simconnect", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     ap.add_argument("--demo", action="store_true", help="fake data, no sim")
-    ap.add_argument("--page", type=int, default=1, help="start page (1-based)")
+    ap.add_argument("--mode", type=int, choices=MODES, default=None, help="force a mode, ignore the stick's selector")
+    ap.add_argument("--page", type=int, default=1, help="start page in mode 1 (1-based)")
     ap.add_argument("--cycle", type=float, default=0, help="auto-advance pages every N seconds")
     ap.add_argument("--no-buttons", action="store_true", help="do not read stick buttons via HID")
     ap.add_argument("--next", default="START_STOP", metavar="BTN", help="button for next page (default START_STOP)")
     ap.add_argument("--prev", default="RESET", metavar="BTN", help="button for previous page (default RESET)")
     ap.add_argument("--home", default="", metavar="BTN", help="button for page 1 (default none)")
-    ap.add_argument("--mode-pages", action="store_true", help="mode switch 1/2/3 also selects pages 1-3")
     ap.add_argument("--no-clock", action="store_true", help="leave the firmware clock/date alone")
     ap.add_argument("--no-auto-brightness", action="store_true", help="do not dim MFD/LEDs by time of day")
     ap.add_argument("--list-buttons", action="store_true", help="print valid button names and exit")
@@ -102,6 +112,7 @@ def parse_args(argv=None):
 
 def run(args):
     mfd = X52Mfd()
+    display = Display(mfd)
     src = DemoSource() if args.demo else SimSource()
     clock = ClockSync(mfd, clock=not args.no_clock, brightness=not args.no_auto_brightness)
     buttons = None
@@ -109,49 +120,23 @@ def run(args):
         buttons = ButtonReader()
         buttons.start()
 
-    pager = Pager(len(PAGES), start=args.page - 1)
-    last_cycle = time.time()
-    last_mode = None
-    redraw_at = 0
+    apps = build_apps(display, start=args.page - 1, next=args.next, prev=args.prev, home=args.home, cycle=args.cycle)
+    bridge = Bridge(display, apps, forced_mode=args.mode)
     usb_failures = 0
-    mfd.set_lines(["MSFS -> X52 MFD", "demo mode" if args.demo else "connecting...", ""], force=True)
-    print(f"running, Ctrl-C to quit. next={args.next} prev={args.prev} home={args.home or '-'}")
+    display.show(["MSFS -> X52 MFD", "demo mode" if args.demo else "connecting...", ""], force=True)
+    print(
+        f"running, Ctrl-C to quit. mode={args.mode or 'selector'} "
+        f"next={args.next} prev={args.prev} home={args.home or '-'}"
+    )
 
     try:
         while True:
             now = time.time()
-            changed = False
-            if buttons:
-                for name in buttons.presses():
-                    if name == args.next:
-                        changed |= pager.next(now)
-                    elif name == args.prev:
-                        changed |= pager.prev(now)
-                    elif name == args.home:
-                        changed |= pager.goto(0, now)
-                    if name in FIRMWARE_BUTTONS:
-                        redraw_at = now + REDRAW_DELAY
-                if args.mode_pages and buttons.mode and buttons.mode != last_mode:
-                    last_mode = buttons.mode
-                    changed |= pager.goto(min(buttons.mode - 1, len(PAGES) - 1), now)
-            if args.cycle and now - last_cycle >= args.cycle:
-                changed |= pager.next(now)
-                last_cycle = now
-            if changed:
-                print("page", pager.page + 1, PAGES[pager.page].title)
-
-            page = PAGES[pager.page]
-            values = src.read(page.vars + CLOCK_VARS) if src.ensure() else None
-            lines = render(page, values) if values else waiting_screen()
-            banner = pager.banner(now)
-            if banner:
-                lines[0] = banner
-
-            force = bool(redraw_at) and now >= redraw_at
-            if force:
-                redraw_at = 0
+            presses = list(buttons.presses()) if buttons else []
+            stick_mode = buttons.mode if buttons else None
+            values = src.read(ALL_VARS) if src.ensure() else None
             try:
-                mfd.set_lines(lines, force=force)
+                bridge.step(presses, stick_mode, values, now=now)
                 clock.update(values)
                 usb_failures = 0
             except usb.core.USBError as e:
@@ -176,8 +161,9 @@ def run(args):
 
 
 def main(argv=None):
-    logging.basicConfig(level=logging.WARNING)
+    logging.basicConfig(level=logging.WARNING, format="%(message)s")
     logging.getLogger("SimConnect").setLevel(logging.ERROR)
+    logging.getLogger("x52_simconnect").setLevel(logging.INFO)
     args = parse_args(argv)
     if args.list_buttons:
         print(" ".join(sorted(BUTTON_NAMES)))

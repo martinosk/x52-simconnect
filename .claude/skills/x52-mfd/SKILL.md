@@ -96,6 +96,11 @@ Open the HID device shared with `hidapi` (`hid.device().open(0x06A3, 0x075C)`). 
 The stick only sends a report when something changes, so a read loop with no user input returns nothing. That is
 normal, not a permissions problem. Edge-detect presses in a thread (`ButtonReader`).
 
+The mode selector (bits 23-25, exactly one set) is therefore also unknown until the first report: `reader.mode`
+is `None` at startup, treat that as mode 1. MSFS sees the three positions as ordinary joystick buttons (unbound in
+the stock profile); if the user binds them, the sim and the bridge both react. Mode switching in the bridge is
+`Bridge.step` in `bridge.py` with the apps in `apps.py`; `--mode N` forces one for testing.
+
 **The three MFD buttons are also handled by the stick firmware and this cannot be disabled over USB** (verified on
 the real stick): Function cycles the firmware clock 1/2/3 and draws a `1`..`3` over your text, then toggles the
 stopwatch view; Start/Stop and Reset drive that stopwatch. Consequences for any app that uses them:

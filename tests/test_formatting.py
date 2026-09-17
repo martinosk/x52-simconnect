@@ -38,6 +38,13 @@ def test_freq():
     assert f.freq(None) == "000.000"
 
 
+def test_hms_wraps_and_tolerates_none():
+    assert f.hms(0) == "00:00:00"
+    assert f.hms(12 * 3600 + 34 * 60 + 56.7) == "12:34:56"
+    assert f.hms(86400 + 61) == "00:01:01"
+    assert f.hms(None) == "--:--:--"
+
+
 def test_bcd_transponder():
     assert f.bcd(0x7000) == "7000"
     assert f.bcd(0x1200) == "1200"

@@ -47,13 +47,19 @@ another is showing.
    variables and a fake event stream.
 
 ## Acceptance criteria
-- [ ] Turning the selector switches the app within one loop tick (0.25 s) and shows a `MODE n NAME` banner.
-- [ ] Mode 1 behaves exactly as today (pages, paging, banner, clock sync, brightness).
-- [ ] Each app keeps its state across mode switches (leave mode 1 on RADIO, come back, still RADIO).
-- [ ] `--mode N` works with `--demo` and without a stick present in the reader (no HID = stay in the forced mode).
-- [ ] Offline test in `tests/`: a scripted sequence of mode values and presses drives a fake `Display` and yields
+- [x] Turning the selector switches the app within one loop tick (0.25 s) and shows a `MODE n NAME` banner.
+- [x] Mode 1 behaves exactly as today (pages, paging, banner, clock sync, brightness).
+- [x] Each app keeps its state across mode switches (leave mode 1 on RADIO, come back, still RADIO).
+- [x] `--mode N` works with `--demo` and without a stick present in the reader (no HID = stay in the forced mode).
+- [x] Offline test in `tests/`: a scripted sequence of mode values and presses drives a fake `Display` and yields
       the expected lines (extend `tests/test_bridge.py`).
-- [ ] README documents the three modes and the joystick-binding caveat.
+- [x] README documents the three modes and the joystick-binding caveat.
+
+## Implemented (2026-09)
+`x52_simconnect/display.py` (`Display`), `x52_simconnect/apps.py` (`App`, `PagesApp`, placeholder `CommsApp`
+and `EventLogApp`, `ALL_VARS`, `build_apps`), `Bridge.step` in `x52_simconnect/bridge.py` as the pure loop body.
+The protocol gained `tick(now)` (called only on the active app, before `render`) so timers such as `--cycle`
+live in the app. The fake event stream for the demo is left to spec 02, which defines the events.
 
 ## Steps
 1. `Display` extraction with no behaviour change; run demo mode and live mode to confirm.
