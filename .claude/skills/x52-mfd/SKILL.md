@@ -6,7 +6,8 @@ description: Drive the MFD, brightness and clocks of a Saitek/Logitech X52 (non-
 # X52 (non-Pro) MFD from Python on Windows
 
 Working implementation in the `x52_simconnect` package: `mfd.py` driver incl. clock/date/brightness,
-`buttons.py` HID reader, `sim_feed.py` streaming SimConnect feed, `bridge.py` main loop. Read those before
+`buttons.py` HID reader, `saitek_driver.py` mode selector via Logitech's driver, `sim_feed.py` streaming
+SimConnect feed, `bridge.py` main loop. Read those before
 writing new code; extend them rather than duplicating. `tests/test_mfd.py` and `tests/test_buttons.py` show how
 to test against a fake device. `SPECS.md` holds the specs for the next features.
 
@@ -63,8 +64,9 @@ HID node : hidgamepad > SaiK075C (Logitech "programming driver", upper filter) >
 - **WinUSB via Zadig / libusbK / UsbDk all replace HidUsb**, which kills the joystick for Windows and the sim. Do not use them here.
 - **libusb-win32 filter driver** (1.2.7.3, 2021, WHQL-signed, works on Windows 11) is the only thing that sits beside
   HidUsb. Use pyusb's **libusb0** backend with it: `usb.backend.libusb0.get_backend()`. libusb-1.0 does not talk to the filter.
-- The proper long-term path is Logitech's own `SaiK075C.sys`, which the X52 profiler uses to write the MFD. Its IOCTLs
-  are undocumented; trace `X52_Profiler.exe` with Process Monitor / API Monitor to recover them. Not done yet.
+- The proper long-term path is Logitech's own `SaiK075C.sys`, which the X52 profiler uses to write the MFD. Its
+  IOCTLs are recovered in section 5 (vendor-command IOCTLs on the SaitekDevice interface); wiring the MFD to
+  them is not done yet.
 
 ## 4. Installing the filter (once per machine)
 
@@ -96,10 +98,33 @@ Open the HID device shared with `hidapi` (`hid.device().open(0x06A3, 0x075C)`). 
 The stick only sends a report when something changes, so a read loop with no user input returns nothing. That is
 normal, not a permissions problem. Edge-detect presses in a thread (`ButtonReader`).
 
-The mode selector (bits 23-25, exactly one set) is therefore also unknown until the first report: `reader.mode`
-is `None` at startup, treat that as mode 1. MSFS sees the three positions as ordinary joystick buttons (unbound in
-the stock profile); if the user binds them, the sim and the bridge both react. Mode switching in the bridge is
-`Bridge.step` in `bridge.py` with the apps in `apps.py`; `--mode N` forces one for testing.
+**The mode selector is stripped from HID with Logitech's driver installed** (verified 2026-09 on driver
+8.0.116.0, filters `SaiK075C` on the HID node and `SaiU075C` on the USB node): bits 23-25 are zero in every HID
+report and in the Windows joystick API, in all three positions, profiler running or not, replug or not. Other
+buttons (Start/Stop = bit 27) arrive fine and the descriptor still declares 34 buttons. MSFS cannot see the
+selector either. Dead ends: HID `GET_REPORT` through libusb0 returns a constant 8 bytes `1b 00 ...`; interrupt
+reads on endpoint 0x81 through the libusb0 filter fail with `invalid configuration 0` (HidUsb configured the
+device; forcing `set_configuration` would reset its pipes, not tried).
+
+**Read it from the driver instead: `x52_simconnect/saitek_driver.py`.** The filter adds private device
+interfaces to the HID node; the profiler's `Sd.Devices.dll` (.NET, readable with dnfile/dncil or ILSpy) names
+them and their IOCTLs:
+- `{0c244c6f-2c78-4f0c-a036-8db0e9012b27}` ("TorontoDevice", profiles): `GetCurrentShiftState` 0x222848, no
+  input, 16-byte output = GUID of the active shift state. The X52 plugin
+  (`Controllers/e81d998b_...dll`) defines them: Mode 1 `cd957a00-26bf-4577-89ff-676166fe3b28`, Mode 2
+  `9fc9dcb2-8bbf-482e-9dd0-c76e22bbc381`, Mode 3 `e536be07-7569-4d2f-878a-795457b889d7`, and `d056b485-...`,
+  `1cab9df5-...`, `b7522229-...` for Mode 1/2/3 with the pinkie switch held. Also `GetVersion` 0x222820
+  (16 bytes, four uint32: 8.0.116.0), `IsProfileActive` 0x222828 (4 bytes), `GetProfile` 0x222804,
+  `SetProfile` 0x222800, `Clear` 0x222808, `Activate` 0x22280C, `StartCplMode` 0x22282C / `StopCplMode`
+  0x222830 (no buffers). Wrong buffer sizes give Windows error 1784.
+- `{1493ba78-4807-418c-a8ca-bab2fe9eb28a}` ("SaitekDevice"): `WriteVendorCommand` 0x222BC0,
+  `ReadVendorCommand` 0x222BC4, `VendorInCommand` 0x222BC8, `VendorOutCommand` 0x222BCC (request 0x91 out /
+  0x90 in, value, index; the same vendor requests libx52 uses). Untested here, but this is the route to drive
+  the MFD through Logitech's driver without libusb-win32.
+Open the interface path with `CreateFileW` (GENERIC_READ|WRITE, share all) and poll with `DeviceIoControl`;
+an IOCTL at 4 Hz is free. Without the Logitech package the interface does not exist; then `buttons.py` sees
+the selector bits itself (as libx52io does on Linux). Mode switching is `Bridge.step` in `bridge.py` with the
+apps in `apps.py`; `--mode N` forces one.
 
 **The three MFD buttons are also handled by the stick firmware and this cannot be disabled over USB** (verified on
 the real stick): Function cycles the firmware clock 1/2/3 and draws a `1`..`3` over your text, then toggles the

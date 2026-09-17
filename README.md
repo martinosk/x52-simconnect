@@ -81,8 +81,9 @@ page, scroll position) while another one is showing, and a `MODE 2 COMMS` banner
 `--mode N` forces one app for testing, ignoring the selector. Until the stick sends its first report (any input
 change) the selector position is unknown and mode 1 is assumed.
 
-MSFS sees the three selector positions as joystick buttons too. They are unbound in the stock X52 profile; if you
-bind them, both the sim and the bridge react to the same turn. The bridge does not try to prevent that.
+With Logitech's X52 software installed, its filter driver removes the selector from the HID reports, so MSFS
+never sees it and cannot bind it. The bridge asks that driver directly instead (the same private request the
+X52 Profiler uses, see `saitek_driver.py`) and falls back to the HID reports when the driver is absent.
 
 Default buttons in mode 1: **Start/Stop** = next page, **Reset** = previous page. A `P2/5 RADIO` banner flashes on
 each change. Start/Stop and Reset keep their own meaning inside each app.
@@ -91,6 +92,7 @@ Hardware and sim diagnostics, each a small standalone tool:
 ```
 python -m x52_simconnect.mfd libusb0 "line 1" "line 2" "line 3"   # raw write to the display
 python -m x52_simconnect.buttons                                  # print button presses (Ctrl-C to stop)
+python -m x52_simconnect.saitek_driver                            # print the mode selector via the Logitech driver
 python -m x52_simconnect.sim_feed ZULU_TIME LOCAL_TIME            # watch the streaming feed for 3 s
 ```
 
@@ -106,6 +108,7 @@ Hardware and sim I/O live in three modules; everything else is plain Python that
 |---|---|---|
 | `mfd.py` | MFD driver: vendor request `0x91` with line, clear, brightness, clock, date, shift and blink commands. Writes are cached; transient USB errors are retried and the device is reopened after repeated failures. | stick |
 | `buttons.py` | Shared-mode HID reader for all 34 buttons and the mode selector (layout from libx52io). | stick |
+| `saitek_driver.py` | Mode selector via Logitech's filter driver, which hides it from HID; recovered from the profiler's own device library. | stick + Logitech driver |
 | `sim_feed.py` | One SimConnect data definition with every SimVar, pushed every 6th visual frame. Hooks the dispatch of the `SimConnect` package, which otherwise ignores bulk data packets. | sim |
 | `formatting.py` | SimVar value -> display text helpers; all tolerate `None`. | - |
 | `pages.py` | The five pages: their SimVars and 16-character renderings. | - |
@@ -126,7 +129,7 @@ python -m ruff check . && python -m ruff format .
 The tests cover the formatters, every page and app with demo and all-`None` data, clock and date encoding, the
 USB retry and caching logic, HID decoding and edge detection, the display's banner and redraw timing, paging,
 mode switching with a scripted selector, CLI validation and the feed's packet parsing.
-CI runs the same on Windows for each push and pull request. Changes to `mfd.py`, `buttons.py` or `sim_feed.py` still
+CI runs the same on Windows for each push and pull request. Changes to `mfd.py`, `buttons.py`, `saitek_driver.py` or `sim_feed.py` still
 need a check on the real stick or a live flight; `--demo` is the quickest hardware-only check.
 
 New features are written up as specs first, see [SPECS.md](SPECS.md).

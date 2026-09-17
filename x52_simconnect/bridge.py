@@ -31,6 +31,7 @@ from .buttons import BUTTON_NAMES, FIRMWARE_BUTTONS, ButtonReader
 from .clock_sync import ClockSync
 from .display import MODES, Display
 from .mfd import X52Mfd
+from .saitek_driver import DriverModeReader
 from .sources import DemoSource, SimSource
 
 POLL_HZ = 4
@@ -115,10 +116,16 @@ def run(args):
     display = Display(mfd)
     src = DemoSource() if args.demo else SimSource()
     clock = ClockSync(mfd, clock=not args.no_clock, brightness=not args.no_auto_brightness)
-    buttons = None
+    buttons = selector = None
     if not args.no_buttons:
         buttons = ButtonReader()
         buttons.start()
+        # Logitech's filter driver hides the selector from HID but answers for it itself (saitek_driver.py).
+        try:
+            selector = DriverModeReader()
+            print("mode selector: read through the Logitech driver")
+        except OSError as e:
+            print(f"mode selector: read from HID reports ({e})")
 
     apps = build_apps(display, start=args.page - 1, next=args.next, prev=args.prev, home=args.home, cycle=args.cycle)
     bridge = Bridge(display, apps, forced_mode=args.mode)
@@ -133,7 +140,9 @@ def run(args):
         while True:
             now = time.time()
             presses = list(buttons.presses()) if buttons else []
-            stick_mode = buttons.mode if buttons else None
+            stick_mode = selector.read() if selector else None
+            if stick_mode is None and buttons:
+                stick_mode = buttons.mode
             values = src.read(ALL_VARS) if src.ensure() else None
             try:
                 bridge.step(presses, stick_mode, values, now=now)
@@ -156,6 +165,8 @@ def run(args):
     finally:
         if buttons:
             buttons.stop()
+        if selector:
+            selector.close()
         src.close()
         mfd.set_lines(["MSFS -> X52 MFD", "stopped", ""], force=True)
 

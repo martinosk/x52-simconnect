@@ -15,11 +15,10 @@ Turning the selector switches instantly. Each app keeps its own state (current p
 another is showing.
 
 ## Facts to build on
-- `x52_simconnect.buttons.ButtonReader` already decodes the selector: `reader.mode` is 1, 2 or 3, updated from HID bits 23-25.
-  Verified live. The selector is only reported when the stick sends a report, i.e. after any input change; at
-  startup `mode` is `None` until the first report. Treat `None` as mode 1.
-- MSFS also sees the selector positions as joystick buttons. In the stock X52 profile they are unbound; if the
-  user binds them, both fire. Document it, do not try to solve it.
+- `x52_simconnect.buttons.ButtonReader` decodes the selector from HID bits 23-25 into `reader.mode` (1, 2, 3;
+  `None` until the first report, treated as mode 1). With Logitech's X52 driver installed those bits are always
+  zero, so the bridge reads the selector from the driver itself (`x52_simconnect/saitek_driver.py`, see the
+  `x52-mfd` skill, section 5) and falls back to the HID bits. MSFS does not see the selector on that stack.
 - The firmware still draws its own clock and stopwatch under our text regardless of mode.
 
 ## Design
