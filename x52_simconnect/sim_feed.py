@@ -12,6 +12,9 @@ capture SIMCONNECT_RECV_ID_SIMOBJECT_DATA, which the package ignores.
     feed.values["INDICATED_ALTITUDE"]   # float, or None before the first packet
     feed.age()                  # seconds since the last packet
 
+    feed = SimFeed([...], events=["FLAPS_INCR", "GEAR_TOGGLE"])   # also be told when these key events fire
+    feed.take_events()          # -> names fired since the last call (see sim_events.py)
+
 CLI:  python -m x52_simconnect.sim_feed [SIMVAR ...]     # print the feed for 3 s
 """
 
@@ -24,36 +27,51 @@ from SimConnect.Enum import (
     SIMCONNECT_DATA_REQUEST_FLAG,
     SIMCONNECT_DATATYPE,
     SIMCONNECT_PERIOD,
+    SIMCONNECT_RECV_EVENT,
     SIMCONNECT_RECV_ID,
     SIMCONNECT_RECV_SIMOBJECT_DATA,
 )
 
+from .sim_events import SimEvents
+
 
 class _HookedSimConnect(SimConnect):
-    """Python-SimConnect with a hook for SIMOBJECT_DATA packets (bulk definitions)."""
+    """Python-SimConnect with hooks for SIMOBJECT_DATA packets (bulk definitions) and for key-event
+    notifications with ids the package does not know (see sim_events.py)."""
 
     def __init__(self, *a, **k):
         self.data_handlers = {}  # request id -> callable(SIMCONNECT_RECV_SIMOBJECT_DATA)
+        self.event_handlers = {}  # client event id -> callable(SIMCONNECT_RECV_EVENT)
         super().__init__(*a, **k)
 
     def my_dispatch_proc(self, pData, cbData, pContext):
-        if pData.contents.dwID == SIMCONNECT_RECV_ID.SIMCONNECT_RECV_ID_SIMOBJECT_DATA:
+        dw_id = pData.contents.dwID
+        if dw_id == SIMCONNECT_RECV_ID.SIMCONNECT_RECV_ID_SIMOBJECT_DATA:
             obj = cast(pData, POINTER(SIMCONNECT_RECV_SIMOBJECT_DATA)).contents
             handler = self.data_handlers.get(obj.dwRequestID)
             if handler:
                 handler(obj)
                 return
+        elif dw_id == SIMCONNECT_RECV_ID.SIMCONNECT_RECV_ID_EVENT:
+            evt = cast(pData, POINTER(SIMCONNECT_RECV_EVENT)).contents
+            handler = self.event_handlers.get(evt.uEventID)
+            if handler:
+                handler(evt)
+                return
         return super().my_dispatch_proc(pData, cbData, pContext)
 
 
 class SimFeed:
-    def __init__(self, names, frame_interval=6):
+    def __init__(self, names, frame_interval=6, events=()):
         """names: Python-SimConnect style names ("PLANE_LATITUDE", "COM_ACTIVE_FREQUENCY:1").
-        frame_interval: send every Nth visual frame (6 at 60 fps = 10 Hz)."""
+        frame_interval: send every Nth visual frame (6 at 60 fps = 10 Hz).
+        events: key event names to be notified about (``take_events``)."""
         self.names = list(dict.fromkeys(names))
         self.frame_interval = frame_interval
+        self.event_names = list(dict.fromkeys(events))
         self.values = dict.fromkeys(self.names)
         self.sm = None
+        self.events = None  # SimEvents while connected and subscribed
         self.units = {}
         self._last_packet = 0.0
         self.packets = 0
@@ -98,6 +116,9 @@ class SimFeed:
         )  # fmt: skip
         if not sm.IsHR(hr, 0):
             raise RuntimeError("RequestDataOnSimObject failed")
+        if self.event_names:
+            self.events = SimEvents(sm)
+            self.events.subscribe(self.event_names)
 
     def _on_data(self, obj):
         """Dispatch-thread callback: unpack one SIMOBJECT_DATA packet of len(names) FLOAT64s."""
@@ -121,6 +142,7 @@ class SimFeed:
 
     def close(self):
         sm, self.sm = self.sm, None
+        self.events = None
         if sm is not None:
             self._close_sm(sm)
         self.values = dict.fromkeys(self.names)
@@ -137,6 +159,10 @@ class SimFeed:
 
     def get(self, names):
         return {n: self.values.get(n) for n in names}
+
+    def take_events(self):
+        """Key events fired since the last call (names, oldest first); empty without a subscription."""
+        return self.events.take() if self.events else []
 
 
 def main(argv=None):

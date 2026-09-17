@@ -6,8 +6,10 @@ Modules, hardware and sim I/O kept apart from the pure logic so the latter is un
 - ``buttons``     HID reader for the stick's buttons and mode selector (needs the stick).
 - ``saitek_driver`` mode selector via Logitech's filter driver, which hides it from HID (needs the driver).
 - ``sim_feed``    streaming SimConnect feed (needs the sim).
+- ``sim_events``  SimConnect key-event notifications and sending (needs the sim).
 - ``formatting``  SimVar -> display-text helpers (pure).
 - ``pages``       the MFD pages and the SimVars they need (pure).
+- ``event_rules`` the event log's rules: which SimVar changes become which lines, and when (pure).
 - ``apps``        one app per mode-selector position: the pages, comms, event log (pure).
 - ``display``     the MFD writer: banner, forced redraw, current mode (pure, given an MFD).
 - ``clock_sync``  firmware clock/date/brightness from sim time (pure, given an MFD).

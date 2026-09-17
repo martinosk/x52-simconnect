@@ -54,8 +54,9 @@ def test_close_without_connection_resets_values():
 
 
 class FakeFeed:
-    def __init__(self, names):
+    def __init__(self, names, events=()):
         self.names = list(names)
+        self.event_names = list(events)
         self.connected = False
         self.closed = 0
         self._last = None
@@ -73,6 +74,9 @@ class FakeFeed:
     def get(self, names):
         return dict.fromkeys(names, 1.0)
 
+    def take_events(self):
+        return ["FLAPS_INCR"] if self.connected else []
+
 
 @pytest.fixture
 def sim_source(monkeypatch):
@@ -87,6 +91,13 @@ def test_sim_source_returns_none_until_first_packet(sim_source):
     assert sim_source.read(NAMES) is None
     sim_source.feed._last = time.time()
     assert sim_source.read(NAMES) == dict.fromkeys(NAMES, 1.0)
+
+
+def test_sim_source_passes_events_through(sim_source):
+    assert sim_source.events() == []
+    sim_source.ensure()
+    assert sim_source.events() == ["FLAPS_INCR"]
+    assert sim_source.feed.event_names == list(sources.ALL_EVENTS)
 
 
 def test_sim_source_reconnects_after_stale_data(sim_source):

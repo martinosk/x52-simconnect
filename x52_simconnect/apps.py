@@ -4,12 +4,15 @@ banners. Every app keeps its own state (page, scroll position) while another one
 
     1  PagesApp     the data pages in pages.py, Start/Stop and Reset page through them
     2  CommsApp     placeholder until spec 05 (tuned station, ATC text)
-    3  EventLogApp  placeholder until spec 02 (rolling log of cockpit actions)
+    3  EventLogApp  rolling log of what was last triggered in the cockpit (event_rules.py decides what)
 """
 
 import logging
+from collections import deque
+from itertools import islice
 
-from .formatting import hms
+from .event_rules import KEY_EVENTS, RULES, VARS, RuleEngine
+from .formatting import age, clip, hms
 from .pages import CLOCK_VARS, PAGES, render
 
 log = logging.getLogger(__name__)
@@ -24,8 +27,15 @@ class App:
     def __init__(self, display):
         self.display = display
 
+    def observe(self, values, now, events=()):
+        """Every loop tick, showing or not: the feed values (None while there is no sim data) and the names
+        of the sim key events fired since the last tick. For apps that collect history in the background."""
+
     def on_button(self, name):
         """A press of ``name`` (see buttons.BUTTON_NAMES) while this app is showing."""
+
+    def on_hold(self, name, seconds):
+        """Every tick while ``name`` stays pressed, with the time since the press (after ``on_button``)."""
 
     def tick(self, now):
         """Once per loop while this app is showing, before ``render``; for timers."""
@@ -36,6 +46,9 @@ class App:
 
     def on_activate(self):
         """The selector was just turned to this app."""
+
+    def on_deactivate(self):
+        """The selector was just turned away from this app."""
 
 
 class PagesApp(App):
@@ -105,21 +118,127 @@ class CommsApp(App):
 
 
 class EventLogApp(App):
-    """Mode 3 placeholder: shows its name and sim time until spec 02 fills it in."""
+    """Mode 3: the last cockpit actions, newest on top, each with its age::
+
+         3s FLAPS 2
+        41s PARK BRK OFF
+        58s GEAR DOWN
+
+    Lines come from ``event_rules.RuleEngine`` (SimVar changes) and, when no rule explains a key event within
+    ``KEY_EVENT_GRACE`` seconds, from the event itself as ``EV FLAPS_INCR``. The log keeps collecting while
+    another app is showing. Start/Stop scrolls to older entries, Reset to newer ones, Reset held for
+    ``HOLD_SECONDS`` jumps back to the newest. New entries while scrolled do not move the view; a ``+3 NEW``
+    marker replaces the age column on line 1 instead. With ``mirror`` the newest entry also flashes as a
+    banner while another app is showing."""
 
     name = "EVENTS"
-    vars = ("ZULU_TIME",)
+    vars = (*VARS, "ZULU_TIME")
+    HISTORY = 100
+    VISIBLE = 3
+    KEY_EVENT_GRACE = 0.3  # a key event waits this long for a rule to explain it before it is logged as EV
+    KEY_EVENT_REPEAT = 1.0  # the same unexplained key event within this window makes no second line
+    HOLD_SECONDS = 1.0
 
+    def __init__(self, display, mirror=False, older="START_STOP", newer="RESET", rules=RULES):
+        super().__init__(display)
+        self.engine = RuleEngine(rules)
+        self.history = deque(maxlen=self.HISTORY)  # newest first: (time, text)
+        self.scroll = 0  # index of the entry on line 1
+        self.unseen = 0  # entries added while scrolled away from the newest
+        self.mirror = mirror
+        self.older, self.newer = older, newer
+        self.showing = False
+        self._now = 0.0
+        self._pending = {}  # key event name -> time first seen, waiting for a rule to explain it
+        self._last_ev = ("", float("-inf"))
+        self._held_done = False
+
+    # ------------------------------------------------------------------ collecting
+    def observe(self, values, now, events=()):
+        self._now = now
+        lines = self.engine.update(values, now)
+        for name in events:
+            if name == self._last_ev[0] and now - self._last_ev[1] < self.KEY_EVENT_REPEAT:
+                self._last_ev = (name, now)  # a held hat repeating an event already logged: one line
+            else:
+                self._pending.setdefault(name, now)
+        if lines or self.engine.settling:
+            self._pending.clear()  # a state change explains whatever was pressed
+        else:
+            for name, since in list(self._pending.items()):
+                if now - since >= self.KEY_EVENT_GRACE:
+                    del self._pending[name]
+                    self._last_ev = (name, now)
+                    lines.append(f"EV {name}")
+        for text in lines:
+            self.add(now, text)
+
+    def add(self, now, text):
+        self.history.appendleft((now, text))
+        if self.scroll:
+            self.scroll = min(self.scroll + 1, self.max_scroll)  # keep what is on screen where it is
+            self.unseen += 1
+        if self.mirror and not self.showing:
+            self.display.banner(text)
+        log.info("event: %s", text)
+
+    # ------------------------------------------------------------------ scrolling
+    @property
+    def max_scroll(self):
+        return max(0, len(self.history) - self.VISIBLE)
+
+    def scroll_by(self, delta):
+        self.scroll = max(0, min(self.scroll + delta, self.max_scroll))
+        if not self.scroll:
+            self.unseen = 0
+
+    def newest(self):
+        self.scroll = self.unseen = 0
+
+    def on_button(self, name):
+        if name == self.older:
+            self.scroll_by(+1)
+        elif name == self.newer:
+            self.scroll_by(-1)
+            self._held_done = False
+
+    def on_hold(self, name, seconds):
+        if name == self.newer and seconds >= self.HOLD_SECONDS and not self._held_done:
+            self._held_done = True
+            self.newest()
+
+    def on_activate(self):
+        self.showing = True
+        self.newest()
+
+    def on_deactivate(self):
+        self.showing = False
+
+    # ------------------------------------------------------------------ rendering
     def render(self, values):
-        return [self.name, "see spec 02", f"Z {hms(values.get('ZULU_TIME'))}"]
+        if not self.history:
+            return [self.name, "no events yet", f"Z {hms(values.get('ZULU_TIME'))}"]
+        lines = []
+        for i, (t, text) in enumerate(islice(self.history, self.scroll, self.scroll + self.VISIBLE)):
+            column = age(self._now - t)
+            if i == 0 and self.scroll and self.unseen:
+                column = f"+{min(self.unseen, self.scroll)} NEW"
+            lines.append(clip(f"{column} {text}"))
+        return lines + [""] * (self.VISIBLE - len(lines))
 
 
 APP_CLASSES = {1: PagesApp, 2: CommsApp, 3: EventLogApp}
 
 # Everything the feed streams, in a stable order and without duplicates: every app's vars plus the clock's.
 ALL_VARS = tuple(dict.fromkeys([n for cls in APP_CLASSES.values() for n in cls.vars] + list(CLOCK_VARS)))
+# The key events the feed subscribes to, for the event log.
+ALL_EVENTS = KEY_EVENTS
 
 
-def build_apps(display, **pages_options):
+def build_apps(display, events_banner=False, **pages_options):
     """One instance per selector position; ``pages_options`` go to ``PagesApp``."""
-    return {1: PagesApp(display, **pages_options), 2: CommsApp(display), 3: EventLogApp(display)}
+    return {
+        1: PagesApp(display, **pages_options),
+        2: CommsApp(display),
+        3: EventLogApp(display, mirror=events_banner),
+    }

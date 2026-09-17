@@ -70,3 +70,13 @@ def test_onoff_keeps_width():
 def test_clip():
     assert f.clip("x" * 20) == "x" * 16
     assert f.clip(123) == "123"
+
+
+AGES = [(0, " 0s"), (3, " 3s"), (41.9, "41s"), (59, "59s"), (60, " 1m"), (12 * 60 + 5, "12m"), (3600, " 1h")]
+AGES += [(400 * 3600, "99h"), (-5, " 0s"), (None, " 0s")]
+
+
+@pytest.mark.parametrize("seconds, expected", AGES)
+def test_age_is_a_three_character_column(seconds, expected):
+    assert f.age(seconds) == expected
+    assert len(f.age(seconds)) == 3

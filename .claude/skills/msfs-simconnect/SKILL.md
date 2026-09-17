@@ -78,8 +78,34 @@ Always wrap values in a tolerant `float()` (None -> default) before formatting; 
 
 ## Writing / events
 - Settable vars: `aq.set("NAME", value)` (only those flagged `'Y'` in RequestList.py).
-- Key events: `AircraftEvents(sm).find("AP_MASTER")()`. Local `L:` vars and calculator code are not reachable with
-  plain SimConnect; that needs a WASM module such as WASimCommander.
+- Key events: `AircraftEvents(sm).find("AP_MASTER")()`, or `SimEvents.send` in `x52_simconnect/sim_events.py`.
+  Local `L:` vars and calculator code are not reachable with plain SimConnect; that needs a WASM module such as
+  WASimCommander.
+
+## Key-event notifications (verified live, MSFS 2024, 2026-09): `x52_simconnect/sim_events.py`
+Be told whenever a key event fires, from any client: `MapClientEventToSimEvent(h, id, b"FLAPS_INCR")`,
+`AddClientEventToNotificationGroup(h, group, id, False)` (not maskable, so the sim still acts on it),
+`SetNotificationGroupPriority(h, group, SIMCONNECT_GROUP_PRIORITY_HIGHEST)`. Each fire then arrives on the
+dispatch thread as `SIMCONNECT_RECV_ID_EVENT` (`SIMCONNECT_RECV_EVENT.uEventID`, `.dwData`).
+- Python-SimConnect's `my_dispatch_proc` routes every `RECV_ID_EVENT` to `handle_id_event`, which only knows
+  its four system events (ids 0-3 of `SIMCONNECT_CLIENT_EVENT_ID`); hook the dispatch and look up your ids
+  first (`_HookedSimConnect.event_handlers` in `sim_feed.py`).
+- The enum classes used as ctypes argtypes have `from_param = int`, so plain ints work as event and group ids.
+  `sim_events.py` numbers its events from 0x1000 and uses group 0x1000, clear of what `map_to_sim_event`
+  appends to the package's enum (4, 5, ...).
+- Mapping 27 events and 47 FLOAT64 datums in one definition took well under a second; no exceptions logged.
+- Seen live: an event sent with `TransmitClientEvent` (priority HIGHEST, `GROUPID_IS_PRIORITY`) comes back as
+  a notification in the same 0.25 s tick as the SimVar change it causes. Joystick bindings deliver them too
+  (`FLAPS_INCR`/`FLAPS_DECR` from an X52 button, verified in a live flight). A cockpit switch clicked with
+  the mouse only showed up as its SimVar changing, so do not rely on notifications for mouse interaction.
+  `python -m x52_simconnect.sim_events` prints whatever arrives.
+- Only subscribe to discrete events (`FLAPS_INCR`, `GEAR_TOGGLE`, `AP_MASTER`, ...). `AXIS_*` and `*_SET`
+  events fire every frame from bound axes; see `event_rules.KEY_EVENTS`.
+- Unit facts from this work: `BRAKE_PARKING_POSITION` is `Position` (0..1), `SPOILERS_HANDLE_POSITION` and
+  `ELEVATOR_TRIM_PCT` are `Percent Over 100` (0..1, trim signed), `GENERAL_ENG_THROTTLE_LEVER_POSITION:1` is
+  `Percent` (0..100), `FLAPS_HANDLE_INDEX` a small integer, `GEAR_HANDLE_POSITION` and the `LIGHT_*`,
+  `PITOT_HEAT`, `ELECTRICAL_MASTER_BATTERY`, `GENERAL_ENG_MASTER_ALTERNATOR:1`, `SIM_ON_GROUND` flags are
+  Bool (threshold, do not truth-test).
 
 ## Testing without the sim
 - Keep `DemoSource` (`x52_simconnect/sources.py`) in step with the pages: every SimVar a page uses must be in

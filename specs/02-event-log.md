@@ -63,13 +63,32 @@ subclass in `x52_simconnect/sim_feed.py` to look up ours first.
 6. Demo mode: a scripted timeline of value changes (flaps, gear, brake) so the app can be watched without the sim.
 
 ## Acceptance criteria
-- [ ] Moving flaps, gear, parking brake, trim, throttle, lights and AP switches in the sim each produce one
-      correctly worded line, once, within 0.5 s.
-- [ ] Continuous inputs (throttle, trim) do not spam: at most one line per settle/step, and nothing while idle.
-- [ ] Key events that change no state still appear as `EV NAME`.
-- [ ] Scrolling works with Start/Stop and Reset; the newest-marker behaviour is as described.
-- [ ] Offline tests cover every rule policy and the age formatting.
-- [ ] No extra SimConnect round trips: everything comes from the streaming feed and event notifications.
+- [x] Moving flaps, gear, parking brake, trim, throttle, lights and AP switches in the sim each produce one
+      correctly worded line, once, within 0.5 s. (Verified live 2026-09-17 for flaps from the joystick, the
+      parking brake, a cockpit switch clicked with the mouse and the trim; the rest offline against the rule
+      engine.)
+- [x] Continuous inputs (throttle, trim) do not spam: at most one line per settle/step, and nothing while idle.
+- [x] Key events that change no state still appear as `EV NAME`.
+- [x] Scrolling works with Start/Stop and Reset; the newest-marker behaviour is as described.
+- [x] Offline tests cover every rule policy and the age formatting.
+- [x] No extra SimConnect round trips: everything comes from the streaming feed and event notifications.
+
+## Implemented (2026-09)
+`x52_simconnect/event_rules.py` (`RULES`, `RuleEngine`, `KEY_EVENTS`), `EventLogApp` in
+`x52_simconnect/apps.py`, `x52_simconnect/sim_events.py` (`SimEvents.subscribe/take/send`), the event branch
+of the dispatch hook in `sim_feed.py`, `--events-banner`, the scripted demo timeline in `sources.py`.
+Deviations from the text above:
+- The age column is three characters (` 3s`, `41s`, `12m`, ` 2h`) plus a space, leaving 12 for the text, so
+  every wording in the table fits without clipping (`PARK BRK OFF`, `COM1 118.750`, `ALT SEL 5000`).
+  `EV` lines with long event names are clipped by the display.
+- The `App` protocol gained `observe(values, now, events)` (every tick, every app, so the log collects while
+  another mode shows), `on_hold(name, seconds)` (for Reset held) and `on_deactivate()` (for the banner
+  mirror). `Bridge.step` takes `held` and `events`.
+- A key event is also suppressed while any rule is still settling (trim moving), not only when a line was
+  produced; otherwise `ELEV_TRIM_UP` would log before the 0.5 s `TRIM` line. Repeats of the same unexplained
+  event within 1 s (a held hat at the trim stop) make one line.
+- Flaps log the handle index (`FLAPS 2`); the surface angle lags the handle, so `FLAPS 2 (10)` would show the
+  old angle at the moment of the change.
 
 ## Steps
 1. `event_rules.py` + `tests/test_event_rules.py` (no sim).
@@ -78,6 +97,10 @@ subclass in `x52_simconnect/sim_feed.py` to look up ours first.
 4. Scrolling, banner mirror option, README.
 
 ## Open questions
-- Flaps as index or degrees? Index is universal; degrees read better. Show `FLAPS 2 (10)` if both fit.
+- Flaps as index or degrees? Index, see above.
 - Does MSFS 2024 deliver notifications for events fired by its own cockpit interaction (mouse click on the
-  flap lever)? FSX did for most; verify early, it decides how much source B is worth.
+  flap lever)? Verified 2026-09 for events sent through SimConnect (`TransmitClientEvent` from another client
+  arrives as a notification and the sim acts on it, priority HIGHEST, not maskable) and for joystick
+  bindings (`FLAPS_INCR`/`FLAPS_DECR` from the stick arrive, and pressing them at the flap stop shows
+  `EV FLAPS_DECR` as intended). A cockpit switch clicked with the mouse changed its SimVar without a
+  matching notification in the same run, so source A stays the primary one.

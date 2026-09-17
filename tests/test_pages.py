@@ -33,7 +33,7 @@ def test_known_renderings():
     v = demo_values(0)
     assert render(PAGES[0], v) == ["IAS 118 GS 124", "ALT  3500 V +500", "HDG 270  TRK 268"]
     assert render(PAGES[1], v) == ["COM1 118.750", "STBY 121.500", "NAV1 110.50 7000"]
-    assert render(PAGES[2], v) == ["AP ON  HDG 270", "ALT  5000 V +700", "--- SPD 200"]
+    assert render(PAGES[2], v) == ["AP OFF --- 270", "ALT  5000 V +700", "--- SPD 200"]
     assert render(PAGES[4], v) == ["N55 37.08", "E012 39.05", "AGL  3455 FT"]
 
 

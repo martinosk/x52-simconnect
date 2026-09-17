@@ -6,12 +6,14 @@ MSFS 2024 -> X52 (non-Pro) MFD bridge: the CLI and the main loop.
   python -m x52_simconnect --page 2       # start on a given page
   python -m x52_simconnect --cycle 5      # auto-advance pages every 5 s
   python -m x52_simconnect --mode 3       # force a mode, ignoring the stick's selector
+  python -m x52_simconnect --events-banner  # flash each new event-log entry in the other modes too
 
 The rotary mode selector on the stick picks the app on the MFD: 1 = data pages, 2 = comms,
 3 = event log (see apps.py). A "MODE 2 COMMS" banner flashes on each change.
 
 Paging in mode 1 (defaults): Start/Stop = next page, Reset = previous page. A "P2/5 RADIO"
 banner flashes on each change. Remap with --next/--prev/--home (see --list-buttons).
+In mode 3, Start/Stop scrolls to older entries, Reset to newer ones, Reset held 1 s to the newest.
 
 The stick firmware also acts on the three MFD buttons: Function cycles clock 1/2/3 and
 toggles the stopwatch view, Start/Stop and Reset drive the stopwatch. That cannot be
@@ -55,28 +57,40 @@ class Bridge:
         self.apps = apps
         self.forced_mode = forced_mode
         self.active = apps[display.mode]
+        self._down = {}  # button name -> time of its press, while it stays held
 
     def select_mode(self, mode):
         """Switch to ``mode`` if it differs: activate its app and flash a ``MODE n NAME`` banner."""
         if not self.display.set_mode(mode):
             return False
+        self.active.on_deactivate()
         self.active = self.apps[mode]
         self.active.on_activate()
+        self._down.clear()
         self.display.banner(f"MODE {mode} {self.active.name}")
         log.info("mode %d %s", mode, self.active.name)
         return True
 
-    def step(self, presses=(), stick_mode=None, values=None, now=None):
+    def step(self, presses=(), stick_mode=None, values=None, now=None, held=(), events=()):
         """One loop tick. ``stick_mode`` is the selector as the reader saw it (None before the first report,
-        which means "leave it"); ``values`` None means no sim data yet. Returns the lines written."""
+        which means "leave it"); ``values`` None means no sim data yet; ``held`` are the buttons currently
+        down; ``events`` the sim key events fired since the last tick. Returns the lines written."""
         now = self.display.tick(now)
         mode = self.forced_mode or stick_mode
         if mode is not None:
             self.select_mode(mode)
+        for app in self.apps.values():
+            app.observe(values, now, events)
         for name in presses:
+            self._down[name] = now
             self.active.on_button(name)
             if name in FIRMWARE_BUTTONS:
                 self.display.force_redraw_in()
+        for name, since in list(self._down.items()):
+            if name in held:
+                self.active.on_hold(name, now - since)
+            else:
+                del self._down[name]
         self.active.tick(now)
         lines = self.active.render(values) if values else waiting_screen()
         return self.display.show(lines)
@@ -94,6 +108,7 @@ def build_parser():
     ap.add_argument("--next", default="START_STOP", metavar="BTN", help="button for next page (default START_STOP)")
     ap.add_argument("--prev", default="RESET", metavar="BTN", help="button for previous page (default RESET)")
     ap.add_argument("--home", default="", metavar="BTN", help="button for page 1 (default none)")
+    ap.add_argument("--events-banner", action="store_true", help="flash new event-log entries in every mode")
     ap.add_argument("--no-clock", action="store_true", help="leave the firmware clock/date alone")
     ap.add_argument("--no-auto-brightness", action="store_true", help="do not dim MFD/LEDs by time of day")
     ap.add_argument("--list-buttons", action="store_true", help="print valid button names and exit")
@@ -127,7 +142,15 @@ def run(args):
         except OSError as e:
             print(f"mode selector: read from HID reports ({e})")
 
-    apps = build_apps(display, start=args.page - 1, next=args.next, prev=args.prev, home=args.home, cycle=args.cycle)
+    apps = build_apps(
+        display,
+        events_banner=args.events_banner,
+        start=args.page - 1,
+        next=args.next,
+        prev=args.prev,
+        home=args.home,
+        cycle=args.cycle,
+    )
     bridge = Bridge(display, apps, forced_mode=args.mode)
     usb_failures = 0
     display.show(["MSFS -> X52 MFD", "demo mode" if args.demo else "connecting...", ""], force=True)
@@ -140,12 +163,14 @@ def run(args):
         while True:
             now = time.time()
             presses = list(buttons.presses()) if buttons else []
+            held = [name for name, down in buttons.state.items() if down] if buttons else []
             stick_mode = selector.read() if selector else None
             if stick_mode is None and buttons:
                 stick_mode = buttons.mode
             values = src.read(ALL_VARS) if src.ensure() else None
+            events = src.events() if values else []
             try:
-                bridge.step(presses, stick_mode, values, now=now)
+                bridge.step(presses, stick_mode, values, now=now, held=held, events=events)
                 clock.update(values)
                 usb_failures = 0
             except usb.core.USBError as e:

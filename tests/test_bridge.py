@@ -128,3 +128,64 @@ def test_demo_source_serves_requested_names_and_moves():
     assert later["UNKNOWN_VAR"] is None
     assert later["AIRSPEED_INDICATED"] != first["AIRSPEED_INDICATED"]
     src.close()
+
+
+def test_event_log_collects_in_the_background_and_shows_on_mode_3(fake_mfd):
+    bridge = make_bridge(fake_mfd)
+    bridge.step(stick_mode=1, values=demo_values(0), now=0)
+    bridge.step(stick_mode=1, values=demo_values(3), now=3)  # BATTERY ON while showing the pages
+    assert bridge.step(stick_mode=1, values=demo_values(5), now=5) == render(PAGES[0], demo_values(5))
+    bridge.step(stick_mode=3, values=demo_values(5), now=6)  # banner
+    assert bridge.step(stick_mode=3, values=demo_values(5), now=7) == [" 2s BEACON ON", " 4s BATTERY ON", ""]
+
+
+def test_events_reach_the_log_and_show_as_ev_when_unexplained(fake_mfd):
+    bridge = make_bridge(fake_mfd, forced_mode=3)
+    bridge.step(values=VALUES, now=0)
+    bridge.step(values=VALUES, now=1, events=["FLAPS_DECR"])
+    assert bridge.step(values=VALUES, now=1.5)[0] == " 0s EV FLAPS_DEC"  # clipped to the display
+
+
+def test_held_reset_jumps_to_the_newest_entry(fake_mfd):
+    bridge = make_bridge(fake_mfd, forced_mode=3)
+    log = bridge.apps[3]
+    bridge.step(values=VALUES, now=0)
+    for i, text in enumerate("ABCDEF"):
+        log.add(float(i), text)
+    bridge.step(presses=["START_STOP"] * 3, values=VALUES, now=6)
+    assert log.scroll == 3
+    bridge.step(presses=["RESET"], values=VALUES, held=["RESET"], now=7)
+    bridge.step(values=VALUES, held=["RESET"], now=7.5)
+    assert log.scroll == 2
+    lines = bridge.step(values=VALUES, held=["RESET"], now=8)
+    assert log.scroll == 0
+    assert lines[0] == " 3s F"
+    bridge.step(values=VALUES, held=[], now=8.25)  # released
+    assert bridge._down == {}
+
+
+def test_mode_change_forgets_held_buttons(fake_mfd):
+    bridge = make_bridge(fake_mfd)
+    bridge.step(presses=["RESET"], stick_mode=1, values=VALUES, held=["RESET"], now=0)
+    bridge.step(stick_mode=3, values=VALUES, held=["RESET"], now=1)
+    assert bridge._down == {}
+
+
+def test_events_banner_mirrors_new_entries_in_mode_1(fake_mfd):
+    bridge = make_bridge(fake_mfd, events_banner=True)
+    bridge.step(stick_mode=1, values=demo_values(0), now=0)
+    assert bridge.step(stick_mode=1, values=demo_values(3), now=3)[0] == "BATTERY ON"
+    assert bridge.step(stick_mode=1, values=demo_values(3), now=4) == render(PAGES[0], demo_values(3))
+
+
+def test_parse_args_events_banner():
+    assert parse_args(["--events-banner"]).events_banner
+    assert not parse_args([]).events_banner
+
+
+def test_demo_source_scripts_key_events_across_the_loop():
+    clock = iter([0.0, 36.0, 38.0, 92.0 + 40.0])
+    src = DemoSource(clock=lambda: next(clock))
+    assert src.events() == []
+    assert src.events() == ["FLAPS_DECR"]
+    assert src.events() == ["COM_STBY_RADIO_SWAP", "FLAPS_DECR"]  # 56 s of loop 1, then 37 s of loop 2
