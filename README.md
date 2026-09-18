@@ -34,7 +34,9 @@ If you own an X52 **Pro**, use a DirectOutput-based tool instead, e.g.
 
 ## Requirements
 - Windows 10/11, Python 3.11+ (developed on 3.14), MSFS 2024 or 2020 (any edition; the Store build works).
-- X52 non-Pro with Logitech's driver installed (it is only needed for joystick input; we do not use its software).
+- X52 non-Pro on Windows' own joystick driver. **Logitech's X52 software and driver must not be installed**: with
+  it, pressing stick buttons while the bridge runs freezes the MFD for half a minute at a time and makes the stick
+  drop out and re-calibrate in flight. The bridge refuses to start beside it. Removal is below; MSFS does not need it.
 - The **libusb-win32 filter driver** on the stick (one-time setup below). It sits *beside* the Windows HID driver,
   so the joystick keeps working in the sim. WinUSB/Zadig would replace the HID driver and break joystick input.
 
@@ -43,6 +45,15 @@ If you own an X52 **Pro**, use a DirectOutput-based tool instead, e.g.
 git clone <this repo> && cd x52-simconnect
 pip install -e .
 ```
+Remove Logitech's X52 driver, if present (once, admin terminal). Uninstalling "Logitech X52" from the Windows
+app list leaves the driver in place, so:
+```
+pnputil /enum-drivers                                 # find the oemNN.inf whose original name is sai075c.inf
+pnputil /delete-driver oemNN.inf /uninstall /force    # then unplug and replug the stick
+python -m x52_simconnect.logitech_driver              # must say "not installed"
+```
+Do this before installing the filter below: removing the driver also removes the filter.
+
 Install the libusb-win32 filter (once):
 1. Download `libusb-win32-devel-filter-1.2.7.3.exe` from the
    [libusb-win32 SourceForge project](https://sourceforge.net/projects/libusb-win32/files/libusb-win32-releases/1.2.7.3/)
@@ -55,6 +66,8 @@ Install the libusb-win32 filter (once):
    (Get-PnpDeviceProperty -InstanceId 'USB\VID_06A3&PID_075C\<your instance>' -KeyName DEVPKEY_Device_Stack).Data
    ```
    must show `\Driver\libusb0` above `\Driver\HidUsb`.
+
+After a replug the MFD shows the stick's power-on text with the backlight off until the bridge starts.
 
 ## Run
 ```
@@ -83,10 +96,6 @@ page, scroll position) while another one is showing, and a `MODE 2 COMMS` banner
 
 `--mode N` forces one app for testing, ignoring the selector. Until the stick sends its first report (any input
 change) the selector position is unknown and mode 1 is assumed.
-
-With Logitech's X52 software installed, its filter driver removes the selector from the HID reports, so MSFS
-never sees it and cannot bind it. The bridge asks that driver directly instead (the same private request the
-X52 Profiler uses, see `saitek_driver.py`) and falls back to the HID reports when the driver is absent.
 
 Default buttons in mode 1: **Start/Stop** = next page, **Reset** = previous page. A `P2/5 RADIO` banner flashes on
 each change. Start/Stop and Reset keep their own meaning inside each app.
@@ -139,17 +148,15 @@ Hardware and sim diagnostics, each a small standalone tool:
 ```
 python -m x52_simconnect.mfd libusb0 "line 1" "line 2" "line 3"   # raw write to the display
 python -m x52_simconnect.buttons                                  # print button presses (Ctrl-C to stop)
-python -m x52_simconnect.saitek_driver                            # print the mode selector via the Logitech driver
+python -m x52_simconnect.logitech_driver                          # check that Logitech's driver is not installed
 python -m x52_simconnect.sim_feed ZULU_TIME LOCAL_TIME            # watch the streaming feed for 3 s
 python -m x52_simconnect.sim_events                               # print key events as the sim fires them, 30 s
 ```
 
-### The firmware and the Logitech driver also draw on the MFD
+### The firmware also draws on the MFD
 Function cycles the firmware clock 1/2/3 (it draws a `1`..`3` under our text) and toggles the stopwatch view;
-Start/Stop and Reset drive that stopwatch. This cannot be turned off over USB, so Function is unmapped by default.
-With Logitech's driver installed, pressing any stick button also writes the button's name on line 2 for as long
-as it is held, and leaves the line blank afterwards, profile or no profile. The bridge force-redraws the display
-0.3 s after every press and release, so the button name shows briefly and our text returns.
+Start/Stop and Reset drive that stopwatch. This cannot be turned off over USB, so Function is unmapped by default
+and the bridge redraws the display 0.3 s after any of the three is pressed.
 
 ## How it works
 Hardware and sim I/O live in three modules; everything else is plain Python that runs without either.
@@ -158,7 +165,7 @@ Hardware and sim I/O live in three modules; everything else is plain Python that
 |---|---|---|
 | `mfd.py` | MFD driver: vendor request `0x91` with line, clear, brightness, clock, date, shift and blink commands. Writes are cached; transient USB errors are retried and the device is reopened after repeated failures. | stick |
 | `buttons.py` | Shared-mode HID reader for all 34 buttons and the mode selector (layout from libx52io). | stick |
-| `saitek_driver.py` | Mode selector via Logitech's filter driver, which hides it from HID; recovered from the profiler's own device library. | stick + Logitech driver |
+| `logitech_driver.py` | Detects Logitech's X52 driver, so the bridge can refuse to start beside it. | - |
 | `sim_feed.py` | One SimConnect data definition with every SimVar, pushed every 6th visual frame. Hooks the dispatch of the `SimConnect` package, which otherwise ignores bulk data packets and unknown event ids. | sim |
 | `sim_events.py` | Key-event notifications (be told when `FLAPS_INCR` fires anywhere; `all_key_events` is the list the bridge subscribes to) and sending events. | sim |
 | `config_server.py` | The config UI: a local web page (`config_ui.html`) and its JSON API, plus the `ConfigStore` that hands a saved config to the main loop. | - |
@@ -186,7 +193,7 @@ USB retry and caching logic, HID decoding and edge detection, the display's bann
 mode switching with a scripted selector, every event-log rule policy and wording, scrolling and the key-event
 dedupe, CLI validation, the feed's packet parsing and the event subscription against a fake DLL, the
 template language, config validation and round trip, and the config UI's server over real HTTP.
-CI runs the same on Windows for each push and pull request. Changes to `mfd.py`, `buttons.py`, `saitek_driver.py`, `sim_feed.py` or `sim_events.py` still
+CI runs the same on Windows for each push and pull request. Changes to `mfd.py`, `buttons.py`, `sim_feed.py` or `sim_events.py` still
 need a check on the real stick or a live flight; `--demo` is the quickest hardware-only check, and
 `--demo --no-stick` runs everything, config UI included, with neither.
 
@@ -195,8 +202,7 @@ New features are written up as specs first, see [SPECS.md](SPECS.md).
 ## Known limits
 - USB control transfers to the stick fail sporadically with Windows error 31 ("A device attached to the system is
   not functioning"), typically near a firmware-handled button press. Retried, never fatal.
-- libusb-win32 is unmaintained (last release 2021, still WHQL-signed and working on Windows 11). The cleaner
-  long-term path is Logitech's own `SaiK075C` filter driver, whose IOCTLs would need reversing.
+- libusb-win32 is unmaintained (last release 2021, still WHQL-signed and working on Windows 11).
 - Only ASCII is safe on the MFD; the character ROM for bytes > 0x7F is untested.
 - The firmware clock keeps ticking between our writes; we rewrite it when the sim minute changes, so time
   acceleration and time jumps are followed within a minute.

@@ -25,4 +25,3 @@ in-sim addon).
       (05 wants `COM ACTIVE FREQ IDENT`, 03 wants `TITLE`).
 - [ ] Windows autostart: launch the bridge when MSFS starts (a tray app that waits for the process, or a shortcut
       next to the sim launcher).
-- [ ] Longer term: replace libusb-win32 with Logitech's own `SaiK075C` IOCTLs (see `x52-mfd` skill).

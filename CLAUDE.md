@@ -8,7 +8,7 @@ Skills in `.claude/skills/`, load them before touching the related code:
 - `msfs-simconnect` - Python-SimConnect quirks, streaming feed pattern, SimVar names and units, testing without the sim.
 
 Layout:
-- `x52_simconnect/` is the package. Hardware/sim I/O: `mfd.py`, `buttons.py`, `saitek_driver.py`, `sim_feed.py`.
+- `x52_simconnect/` is the package. Hardware/sim I/O: `mfd.py`, `buttons.py`, `logitech_driver.py`, `sim_feed.py`.
   Pure logic: `formatting.py`, `templates.py`, `pages.py`, `config.py`, `event_rules.py`, `apps.py`, `display.py`,
   `clock_sync.py`, `sources.py`. `config_server.py` + `config_ui.html` are the config UI (local web page, stdlib
   only, no build step). `bridge.py` is the CLI and main loop

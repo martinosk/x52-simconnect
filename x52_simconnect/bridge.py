@@ -21,13 +21,15 @@ In mode 3, Start/Stop scrolls to older entries, Reset to newer ones, Reset held 
 
 The stick firmware also acts on the three MFD buttons: Function cycles clock 1/2/3 and
 toggles the stopwatch view, Start/Stop and Reset drive the stopwatch. That cannot be
-disabled over USB, so Function is unmapped by default. Logitech's driver also writes the
-name of any pressed button on MFD line 2 and blanks that line on release. The display is
-therefore force-redrawn shortly after every press and release, to restore what we drew.
+disabled over USB, so Function is unmapped by default and the display is force-redrawn
+shortly after any of those buttons is pressed, to overwrite what the firmware drew.
+
+Logitech's X52 driver must not be installed (see README.md); the bridge refuses to start with it.
 """
 
 import argparse
 import logging
+import sys
 import time
 from collections import deque
 from datetime import datetime
@@ -35,13 +37,13 @@ from datetime import datetime
 import usb.core
 
 from . import config as cfg
+from . import logitech_driver
 from .apps import build_apps, configure_apps, feed_vars
-from .buttons import BUTTON_NAMES, ButtonReader
+from .buttons import BUTTON_NAMES, FIRMWARE_BUTTONS, ButtonReader
 from .clock_sync import ClockSync
 from .config_server import DEFAULT_PORT, ConfigServer, ConfigStore
 from .display import MODES, Display
 from .mfd import NullMfd, X52Mfd
-from .saitek_driver import DriverModeReader
 from .sources import DemoSource, SimSource
 
 POLL_HZ = 4
@@ -75,7 +77,6 @@ class Bridge:
         self.active = self.apps[mode]
         self.active.on_activate()
         self._down.clear()
-        self.display.force_redraw_in()
         self.display.banner(f"MODE {mode} {self.active.name}")
         log.info("mode %d %s", mode, self.active.name)
         return True
@@ -90,18 +91,16 @@ class Bridge:
             self.select_mode(mode)
         for app in self.apps.values():
             app.observe(values, now, events)
-        # The firmware (clock buttons) and Logitech's driver (any button: its name on line 2 while held,
-        # blank after) both draw on the MFD; redraw everything shortly after each press and release.
         for name in presses:
             self._down[name] = now
             self.active.on_button(name)
-            self.display.force_redraw_in()
+            if name in FIRMWARE_BUTTONS:
+                self.display.force_redraw_in()
         for name, since in list(self._down.items()):
             if name in held:
                 self.active.on_hold(name, now - since)
             else:
                 del self._down[name]
-                self.display.force_redraw_in()
         self.active.tick(now)
         lines = self.active.render(values) if values else waiting_screen()
         return self.display.show(lines)
@@ -179,6 +178,8 @@ def live_status(bridge, lines, values, demo, recent_events):
 
 
 def run(args):
+    if not args.no_stick and logitech_driver.installed():
+        sys.exit("Logitech's X52 driver is installed: with it the stick freezes. Remove it first, see README.md.")
     mfd = NullMfd() if args.no_stick else X52Mfd()
     display = Display(mfd)
     store, server = open_config(args)
@@ -186,16 +187,10 @@ def run(args):
     src = DemoSource() if args.demo else SimSource(names)
     recent_events = deque(maxlen=12)  # newest first, for the UI's "ignore this one" list
     clock = ClockSync(mfd, clock=not args.no_clock, brightness=not args.no_auto_brightness)
-    buttons = selector = None
+    buttons = None
     if not args.no_buttons and not args.no_stick:
         buttons = ButtonReader()
         buttons.start()
-        # Logitech's filter driver hides the selector from HID but answers for it itself (saitek_driver.py).
-        try:
-            selector = DriverModeReader()
-            print("mode selector: read through the Logitech driver")
-        except OSError as e:
-            print(f"mode selector: read from HID reports ({e})")
 
     apps = build_apps(
         display,
@@ -220,9 +215,7 @@ def run(args):
             now = time.time()
             presses = list(buttons.presses()) if buttons else []
             held = [name for name, down in buttons.state.items() if down] if buttons else []
-            stick_mode = selector.read() if selector else None
-            if stick_mode is None and buttons:
-                stick_mode = buttons.mode
+            stick_mode = buttons.mode if buttons else None
             new_config = store.take()
             if new_config:
                 configure_apps(apps, new_config)
@@ -243,7 +236,7 @@ def run(args):
                 usb_failures = 0
             except usb.core.USBError as e:
                 usb_failures += 1
-                print(f"MFD write failed ({usb_failures}): {str(e).strip()[:120]}")
+                print(f"{time.strftime('%H:%M:%S')} MFD write failed ({usb_failures}): {str(e).strip()[:120]}")
                 if usb_failures >= USB_FAILURES_BEFORE_REOPEN:
                     try:
                         mfd.reopen()
@@ -260,8 +253,6 @@ def run(args):
             server.stop()
         if buttons:
             buttons.stop()
-        if selector:
-            selector.close()
         src.close()
         mfd.set_lines(["MSFS -> X52 MFD", "stopped", ""], force=True)
 

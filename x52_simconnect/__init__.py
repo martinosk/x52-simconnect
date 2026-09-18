@@ -4,7 +4,7 @@ Modules, hardware and sim I/O kept apart from the pure logic so the latter is un
 
 - ``mfd``         USB driver for the MFD, clocks and brightness (needs the stick).
 - ``buttons``     HID reader for the stick's buttons and mode selector (needs the stick).
-- ``saitek_driver`` mode selector via Logitech's filter driver, which hides it from HID (needs the driver).
+- ``logitech_driver`` detects Logitech's X52 driver, which must not be installed.
 - ``sim_feed``    streaming SimConnect feed (needs the sim).
 - ``sim_events``  SimConnect key-event notifications and sending (needs the sim).
 - ``formatting``  SimVar -> display-text helpers (pure).

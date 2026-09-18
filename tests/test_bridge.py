@@ -1,7 +1,7 @@
 import pytest
 
 from x52_simconnect.apps import ALL_VARS, build_apps
-from x52_simconnect.bridge import Bridge, parse_args, waiting_screen
+from x52_simconnect.bridge import Bridge, parse_args, run, waiting_screen
 from x52_simconnect.display import Display
 from x52_simconnect.pages import PAGES, render
 from x52_simconnect.sources import DemoSource, demo_values
@@ -87,32 +87,21 @@ def forces(fake_mfd):
     return [args[1] for name, args in fake_mfd.calls if name == "set_lines"]
 
 
-def test_any_button_press_and_its_release_force_a_redraw_after_the_delay(fake_mfd):
+def test_firmware_buttons_force_a_redraw_after_the_delay(fake_mfd):
     bridge = make_bridge(fake_mfd)
-    bridge.step(presses=["FIRE"], stick_mode=1, values=VALUES, held=["FIRE"], now=0)
-    bridge.step(stick_mode=1, values=VALUES, held=["FIRE"], now=0.2)
-    bridge.step(stick_mode=1, values=VALUES, held=["FIRE"], now=0.3)  # driver text overwritten while held
-    bridge.step(stick_mode=1, values=VALUES, held=["FIRE"], now=1.0)
-    bridge.step(stick_mode=1, values=VALUES, held=[], now=1.25)  # released: the driver blanked line 2
-    bridge.step(stick_mode=1, values=VALUES, held=[], now=1.5)
-    bridge.step(stick_mode=1, values=VALUES, held=[], now=1.75)
-    assert forces(fake_mfd) == [False, False, True, False, False, False, True]
-
-
-def test_short_press_forces_one_redraw(fake_mfd):
-    bridge = make_bridge(fake_mfd)
-    bridge.step(presses=["START_STOP"], stick_mode=1, values=VALUES, now=0)  # released before the tick
+    bridge.step(presses=["START_STOP"], stick_mode=1, values=VALUES, now=0)
     bridge.step(stick_mode=1, values=VALUES, now=0.2)
     bridge.step(stick_mode=1, values=VALUES, now=0.3)
     assert forces(fake_mfd) == [False, False, True]
 
 
-def test_mode_change_forces_a_redraw(fake_mfd):
+def test_other_buttons_and_mode_changes_force_nothing(fake_mfd):
     bridge = make_bridge(fake_mfd)
-    bridge.step(stick_mode=1, values=VALUES, now=0)
+    bridge.step(presses=["FIRE"], stick_mode=1, values=VALUES, held=["FIRE"], now=0)
+    bridge.step(stick_mode=1, values=VALUES, held=[], now=0.3)
     bridge.step(stick_mode=2, values=VALUES, now=1)
     bridge.step(stick_mode=2, values=VALUES, now=1.3)
-    assert forces(fake_mfd) == [False, False, True]
+    assert forces(fake_mfd) == [False] * 4
 
 
 def test_cycle_advances_pages_while_in_mode_1(fake_mfd):
@@ -212,3 +201,10 @@ def test_demo_source_scripts_key_events_across_the_loop():
     assert src.events() == []
     assert src.events() == ["FLAPS_DECR"]
     assert src.events() == ["COM_STBY_RADIO_SWAP", "FLAPS_DECR"]  # 56 s of loop 1, then 37 s of loop 2
+
+
+def test_refuses_to_start_beside_logitechs_driver(monkeypatch):
+    monkeypatch.setattr("x52_simconnect.bridge.logitech_driver.installed", lambda: True)
+    monkeypatch.setattr("x52_simconnect.bridge.X52Mfd", lambda: pytest.fail("the stick must not be opened"))
+    with pytest.raises(SystemExit, match="Logitech"):
+        run(parse_args(["--no-ui"]))

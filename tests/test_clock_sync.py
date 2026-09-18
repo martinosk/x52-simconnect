@@ -40,10 +40,17 @@ def test_update_sets_clocks_date_and_brightness(fake_mfd):
     ]
 
 
-def test_update_skips_without_sim_time(fake_mfd):
+def test_without_sim_time_only_the_display_is_lit(fake_mfd):
     sync = ClockSync(fake_mfd)
     sync.update(None)
+    assert fake_mfd.calls == [("set_brightness", (128,)), ("set_led_brightness", (128,))]
+    fake_mfd.calls.clear()
     sync.update({"ZULU_TIME": None, "TIME_OF_DAY": 3})
+    assert fake_mfd.calls == [("set_brightness", (128,)), ("set_led_brightness", (128,))]
+
+
+def test_without_sim_time_and_brightness_disabled_nothing_is_touched(fake_mfd):
+    ClockSync(fake_mfd, brightness=False).update(None)
     assert fake_mfd.calls == []
 
 

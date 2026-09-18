@@ -16,9 +16,8 @@ another is showing.
 
 ## Facts to build on
 - `x52_simconnect.buttons.ButtonReader` decodes the selector from HID bits 23-25 into `reader.mode` (1, 2, 3;
-  `None` until the first report, treated as mode 1). With Logitech's X52 driver installed those bits are always
-  zero, so the bridge reads the selector from the driver itself (`x52_simconnect/saitek_driver.py`, see the
-  `x52-mfd` skill, section 5) and falls back to the HID bits. MSFS does not see the selector on that stack.
+  `None` until the first report, treated as mode 1). Logitech's X52 driver zeroes those bits; it must not be
+  installed (README, Requirements).
 - The firmware still draws its own clock and stopwatch under our text regardless of mode.
 
 ## Design

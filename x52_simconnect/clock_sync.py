@@ -22,9 +22,16 @@ class ClockSync:
         self.brightness = brightness
         self._now = now
 
+    def _set_brightness(self, level):
+        self.mfd.set_brightness(level)
+        self.mfd.set_led_brightness(level)
+
     def update(self, values):
-        """Apply one set of feed values. Skips quietly while there is no sim time yet."""
+        """Apply one set of feed values. While there is no sim time yet, only make sure the display is lit:
+        the stick powers up with the MFD backlight off."""
         if values is None or values.get("ZULU_TIME") is None:
+            if self.brightness:
+                self._set_brightness(DEFAULT_BRIGHTNESS)
             return
         if self.clock:
             zulu = num(values["ZULU_TIME"]) / 60  # minutes since midnight
@@ -39,6 +46,4 @@ class ClockSync:
                 int(num(values["ZULU_YEAR"], 2000)),
             )
         if self.brightness:
-            level = BRIGHTNESS.get(int(num(values["TIME_OF_DAY"], 1)), DEFAULT_BRIGHTNESS)
-            self.mfd.set_brightness(level)
-            self.mfd.set_led_brightness(level)
+            self._set_brightness(BRIGHTNESS.get(int(num(values["TIME_OF_DAY"], 1)), DEFAULT_BRIGHTNESS))

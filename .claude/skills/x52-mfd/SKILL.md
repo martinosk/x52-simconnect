@@ -6,7 +6,7 @@ description: Drive the MFD, brightness and clocks of a Saitek/Logitech X52 (non-
 # X52 (non-Pro) MFD from Python on Windows
 
 Working implementation in the `x52_simconnect` package: `mfd.py` driver incl. clock/date/brightness,
-`buttons.py` HID reader, `saitek_driver.py` mode selector via Logitech's driver, `sim_feed.py` streaming
+`buttons.py` HID reader, `logitech_driver.py` prerequisite check, `sim_feed.py` streaming
 SimConnect feed, `bridge.py` main loop. Read those before
 writing new code; extend them rather than duplicating. `tests/test_mfd.py` and `tests/test_buttons.py` show how
 to test against a fake device. `SPECS.md` holds the specs for the next features.
@@ -46,7 +46,8 @@ One control transfer per command. `bmRequestType=0x40` (vendor, device, host-to-
 A line is 16 chars. Write = clear command, then 8 char-pair writes. Keep an in-memory copy of what is shown and
 skip unchanged lines (see `X52Mfd.set_line`). ASCII only is verified; bytes > 0x7F untested.
 
-**Transfers fail sporadically.** Seen live after ~minutes of use, close to a firmware-handled button press:
+**Transfers fail sporadically.** Seen live (with Logitech's driver still installed; not re-checked without it)
+after ~minutes of use, close to a firmware-handled button press:
 `usb.core.USBError: libusb0-dll:err [control_msg] sending control message failed, win error: A device attached to
 the system is not functioning.` (Windows error 31). It is transient. Retry each transfer 3x with ~50 ms gaps, mark
 the line as unknown on failure so it gets rewritten, and if several writes in a row fail, dispose the handle and
@@ -54,19 +55,28 @@ the line as unknown on failure so it gets rewritten, and if several writes in a 
 
 ## 3. Windows driver stack and why libusb-1.0 fails
 
-The stick is a single-interface HID device. Its stack after installing Logitech's driver 8.0.116.0:
+**Logitech's X52 software/driver (8.0.116.0: `SaiK075C`, `SaiU075C`, `sai075c.inf`) must not be installed.** It
+writes to the MFD itself on every button press, and with two writers the stick's vendor requests time out for
+~30 s at a time after a few seconds of button use (garbled MFD text, stick blanking and re-calibrating in flight).
+It also zeroes the mode-selector bits in the HID reports. `logitech_driver.installed()` detects it and the bridge
+refuses to start. Without it, 20 s of hammering buttons under 108 transfers/s: every transfer 1-2 ms, none failed.
+- Remove: uninstalling "Logitech X52" from the app list leaves the driver bound. Admin shell:
+  `pnputil /enum-drivers` (find the `oemNN.inf` whose original name is `sai075c.inf`),
+  `pnputil /delete-driver oemNN.inf /uninstall /force`, replug. The stick falls back to `input.inf`, and the swap
+  **drops the libusb0 filter**: run section 4 again.
+- Bare firmware state after plug-in: MFD backlight off, text "Saitek X52 Flight Control System", until something
+  sets the brightness (`ClockSync.update` does, also before the sim is up).
+
+The stick is a single-interface HID device. The stack to have:
 ```
-USB node : libusb0 (added by us) > HidUsb > SaiU075C (Logitech lower filter) > USBHUB3
-HID node : hidgamepad > SaiK075C (Logitech "programming driver", upper filter) > HidUsb
+USB node : libusb0 (added by us) > HidUsb > USBHUB3
+HID node : hidgamepad > HidUsb
 ```
 - **libusb-1.0 (pip `libusb` + pyusb libusb1 backend) cannot send vendor requests to a HidUsb-bound device.**
   It raises `NotImplementedError: Operation not supported or unimplemented on this platform`. Not fixable in code.
 - **WinUSB via Zadig / libusbK / UsbDk all replace HidUsb**, which kills the joystick for Windows and the sim. Do not use them here.
 - **libusb-win32 filter driver** (1.2.7.3, 2021, WHQL-signed, works on Windows 11) is the only thing that sits beside
   HidUsb. Use pyusb's **libusb0** backend with it: `usb.backend.libusb0.get_backend()`. libusb-1.0 does not talk to the filter.
-- The proper long-term path is Logitech's own `SaiK075C.sys`, which the X52 profiler uses to write the MFD. Its
-  IOCTLs are recovered in section 5 (vendor-command IOCTLs on the SaitekDevice interface); wiring the MFD to
-  them is not done yet.
 
 ## 4. Installing the filter (once per machine)
 
@@ -98,33 +108,8 @@ Open the HID device shared with `hidapi` (`hid.device().open(0x06A3, 0x075C)`). 
 The stick only sends a report when something changes, so a read loop with no user input returns nothing. That is
 normal, not a permissions problem. Edge-detect presses in a thread (`ButtonReader`).
 
-**The mode selector is stripped from HID with Logitech's driver installed** (verified 2026-09 on driver
-8.0.116.0, filters `SaiK075C` on the HID node and `SaiU075C` on the USB node): bits 23-25 are zero in every HID
-report and in the Windows joystick API, in all three positions, profiler running or not, replug or not. Other
-buttons (Start/Stop = bit 27) arrive fine and the descriptor still declares 34 buttons. MSFS cannot see the
-selector either. Dead ends: HID `GET_REPORT` through libusb0 returns a constant 8 bytes `1b 00 ...`; interrupt
-reads on endpoint 0x81 through the libusb0 filter fail with `invalid configuration 0` (HidUsb configured the
-device; forcing `set_configuration` would reset its pipes, not tried).
-
-**Read it from the driver instead: `x52_simconnect/saitek_driver.py`.** The filter adds private device
-interfaces to the HID node; the profiler's `Sd.Devices.dll` (.NET, readable with dnfile/dncil or ILSpy) names
-them and their IOCTLs:
-- `{0c244c6f-2c78-4f0c-a036-8db0e9012b27}` ("TorontoDevice", profiles): `GetCurrentShiftState` 0x222848, no
-  input, 16-byte output = GUID of the active shift state. The X52 plugin
-  (`Controllers/e81d998b_...dll`) defines them: Mode 1 `cd957a00-26bf-4577-89ff-676166fe3b28`, Mode 2
-  `9fc9dcb2-8bbf-482e-9dd0-c76e22bbc381`, Mode 3 `e536be07-7569-4d2f-878a-795457b889d7`, and `d056b485-...`,
-  `1cab9df5-...`, `b7522229-...` for Mode 1/2/3 with the pinkie switch held. Also `GetVersion` 0x222820
-  (16 bytes, four uint32: 8.0.116.0), `IsProfileActive` 0x222828 (4 bytes), `GetProfile` 0x222804,
-  `SetProfile` 0x222800, `Clear` 0x222808, `Activate` 0x22280C, `StartCplMode` 0x22282C / `StopCplMode`
-  0x222830 (no buffers). Wrong buffer sizes give Windows error 1784.
-- `{1493ba78-4807-418c-a8ca-bab2fe9eb28a}` ("SaitekDevice"): `WriteVendorCommand` 0x222BC0,
-  `ReadVendorCommand` 0x222BC4, `VendorInCommand` 0x222BC8, `VendorOutCommand` 0x222BCC (request 0x91 out /
-  0x90 in, value, index; the same vendor requests libx52 uses). Untested here, but this is the route to drive
-  the MFD through Logitech's driver without libusb-win32.
-Open the interface path with `CreateFileW` (GENERIC_READ|WRITE, share all) and poll with `DeviceIoControl`;
-an IOCTL at 4 Hz is free. Without the Logitech package the interface does not exist; then `buttons.py` sees
-the selector bits itself (as libx52io does on Linux). Mode switching is `Bridge.step` in `bridge.py` with the
-apps in `apps.py`; `--mode N` forces one.
+The mode selector is bits 23-25, one of them always set; `ButtonReader.mode` follows it and MSFS sees it as three
+buttons. Mode switching is `Bridge.step` in `bridge.py` with the apps in `apps.py`; `--mode N` forces one.
 
 **The three MFD buttons are also handled by the stick firmware and this cannot be disabled over USB** (verified on
 the real stick): Function cycles the firmware clock 1/2/3 and draws a `1`..`3` over your text, then toggles the
@@ -133,17 +118,12 @@ stopwatch view; Start/Stop and Reset drive that stopwatch. Consequences for any 
 - Force a full redraw of all three lines ~0.3 s after any of these presses to overwrite what the firmware drew.
 - Do not rely on the firmware digits as a page indicator; draw your own (e.g. a short `P2/5 TITLE` banner).
 
-**Logitech's driver writes on the MFD too** (verified 2026-09, driver 8.0.116.0, no profiler process running and
-`IsProfileActive` returning 0): pressing *any* stick button puts the button's name on line 2 for as long as it is
-held, and line 2 is blanked on release. No registry setting for it was found (`Services\SaiK075C` has only a
-`CdoGuid` parameter). The bridge handles it by forcing a full redraw 0.3 s after every press and every release
-(`Bridge.step` sees releases as names dropping out of `held`).
-
 ## 6. Quick commands
 
 ```
 python -m x52_simconnect.mfd libusb0 "line 1" "line 2" "line 3"
 python -m x52_simconnect.buttons        # prints presses and the mode; Ctrl-C to stop (no --help)
+python -m x52_simconnect.logitech_driver  # must say "not installed"
 python -m x52_simconnect --demo --cycle 3
 ```
 `X52 (06A3:075C) not found; is the libusb0 filter installed and loaded?` means the filter is not in the live
