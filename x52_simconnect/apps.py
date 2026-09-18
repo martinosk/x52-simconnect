@@ -59,12 +59,17 @@ class PagesApp(App):
 
     def __init__(self, display, start=0, next="START_STOP", prev="RESET", home="", cycle=0.0):  # noqa: A002
         super().__init__(display)
-        self.pages = PAGES
+        self.pages = PAGES  # the built-in ones, until a config replaces them (``set_pages``)
         self.page = start % len(self.pages)
         self.buttons = {next: self.next, prev: self.prev, home: self.home}
         self.buttons.pop("", None)
         self.cycle = cycle
         self._last_cycle = None
+
+    def set_pages(self, pages):
+        """Swap in another set of pages (from the config), staying on the same position where it exists."""
+        self.pages = tuple(pages)
+        self.page = min(self.page, len(self.pages) - 1)
 
     @property
     def title(self):
@@ -152,6 +157,14 @@ class EventLogApp(App):
         self._pending = {}  # key event name -> time first seen, waiting for a rule to explain it
         self._ev_logged = {}  # key event name -> when it was last logged as EV, or repeated since
         self._held_done = False
+        self.key_events = True  # log key events no rule explains, as EV NAME
+        self.ignored_key_events = frozenset()
+
+    def configure(self, hidden=(), key_events=True, ignored_key_events=()):
+        """What to log (``config.EventsConfig``): rules to hide, by SimVar, and which key events make a line."""
+        self.engine.hidden = frozenset(hidden)
+        self.key_events = key_events
+        self.ignored_key_events = frozenset(ignored_key_events)
 
     # ------------------------------------------------------------------ collecting
     def observe(self, values, now, events=()):
@@ -162,14 +175,15 @@ class EventLogApp(App):
                 self._ev_logged[name] = now  # a held hat repeating an event already logged: one line
             else:
                 self._pending.setdefault(name, now)
-        if lines or self.engine.settling:
-            self._pending.clear()  # a state change explains whatever was pressed
+        if self.engine.fired or self.engine.settling:
+            self._pending.clear()  # a state change explains whatever was pressed, shown or hidden
         else:
             for name, since in list(self._pending.items()):
                 if now - since >= self.KEY_EVENT_GRACE:
                     del self._pending[name]
                     self._ev_logged[name] = now
-                    lines.append(f"EV {name}")
+                    if self.key_events and name not in self.ignored_key_events:
+                        lines.append(f"EV {name}")
         for text in lines:
             self.add(now, text)
 
@@ -231,6 +245,18 @@ APP_CLASSES = {1: PagesApp, 2: CommsApp, 3: EventLogApp}
 
 # Everything the feed streams, in a stable order and without duplicates: every app's vars plus the clock's.
 ALL_VARS = tuple(dict.fromkeys([n for cls in APP_CLASSES.values() for n in cls.vars] + list(CLOCK_VARS)))
+
+
+def feed_vars(config):
+    """``ALL_VARS`` plus whatever the configured pages read: what the feed has to stream for ``config``."""
+    return tuple(dict.fromkeys(ALL_VARS + config.vars))
+
+
+def configure_apps(apps, config):
+    """Apply a ``config.Config`` to running apps: the mode 1 pages and what the mode 3 log shows."""
+    apps[1].set_pages(config.build_pages())
+    events = config.events
+    apps[3].configure(events.hidden, events.key_events, events.ignored_key_events)
 
 
 def build_apps(display, events_banner=False, **pages_options):

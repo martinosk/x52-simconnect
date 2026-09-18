@@ -1,6 +1,8 @@
 # Spec 03 - Aircraft-aware pages from a config file
 
-**Depends on:** nothing (fits inside `PagesApp` once 01 exists). **Provides:** the template renderer used by 04 and 02.
+**Depends on:** 06, which built items 2, 4, 5 and 6 below (`templates.py`, `config.py` with `[[page]]` at the top
+level, hot reload, the default pages as templates) and a UI to edit them. **Left for this spec:** profiles
+(`[[profile]]`, `match`, `extends`), the aircraft `TITLE`, `--profile`, and a profile switcher in the UI.
 
 ## Goal
 Different aircraft want different pages: a jet needs N1, FL and Mach; the C152 needs RPM and gallons. Page sets

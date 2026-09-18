@@ -106,6 +106,14 @@ def find_device(backend_name="libusb0"):
     return dev
 
 
+class NullMfd:
+    """Stands in for the stick (``--no-stick``): accepts every ``X52Mfd`` call and does nothing, so the loop,
+    the apps and the config UI can run on a machine without an X52. The UI mirrors what it would show."""
+
+    def __getattr__(self, name):
+        return lambda *args, **kwargs: None
+
+
 class X52Mfd:
     """Three 16-character lines plus clocks, date, brightness and the two indicators.
     Every write is cached, so repeating the same text or value costs no USB traffic."""

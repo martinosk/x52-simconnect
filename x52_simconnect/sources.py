@@ -30,6 +30,16 @@ class SimSource:
     def connected(self):
         return self.feed.connected
 
+    def set_names(self, names):
+        """Stream ``names`` from now on. A data definition cannot grow, so a changed list means a new feed;
+        ``ensure`` reconnects it on the next tick."""
+        from .sim_feed import SimFeed
+
+        if list(dict.fromkeys(names)) != self.feed.names:
+            self.feed.close()
+            self.feed = SimFeed(names, events=self.feed.event_names)
+            self._next_try = 0
+
     def ensure(self):
         if self.feed.connected:
             return True
@@ -217,6 +227,9 @@ class DemoSource:
 
     def ensure(self):
         return True
+
+    def set_names(self, names):
+        pass
 
     def read(self, names):
         vals = demo_values(self._clock() - self.t0)

@@ -53,6 +53,10 @@ One data definition with every variable, pushed by the sim; reading is a dict lo
   detector reconnects needlessly).
 - In the handler: `cast(obj.dwData, POINTER(c_double * n)).contents`, check `obj.dwDefineCount == n`.
 - Track the time of the last packet; treat > 15 s as "sim gone" and reconnect.
+- A data definition cannot be extended while it streams; to add SimVars make a new `SimFeed`
+  (`SimSource.set_names`, used when the config UI saves a page with a new SimVar; reconnect ~0.4 s, verified live).
+- `sim_feed.simvar_units()` reads the package's name -> unit table without a connection; indexed names are
+  keyed `NAME:index`. Useful to validate user-typed SimVars and to warn about `Radians` and `Rankine` units.
 - FLOAT64 only. Strings (`TITLE`) either via the one-shot API every few seconds, or add STRING256 datums and parse
   the mixed packet by offset.
 

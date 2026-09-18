@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>X52 MFD setup</title>
+<style>
+  :root {
+    --aluminium: #dde1e6; --plate: #f5f7f9; --ink: #16233a; --quiet: #55627a; --rule: #b9c2ce;
+    --lcd: #2f6feb; --lcd-ink: #0b1e47; --lcd-ghost: rgba(11, 30, 71, .07); --amber: #b86a00; --amber-bg: #fff3dc;
+    --focus: #0b4fd6;
+    --ui: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    --mono: "Cascadia Mono", Consolas, ui-monospace, "DejaVu Sans Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --aluminium: #141a26; --plate: #1d2535; --ink: #e6ebf3; --quiet: #9aa7bd; --rule: #36425a;
+            --amber: #ffb84d; --amber-bg: #3a2a0c; --focus: #7fb0ff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--aluminium); color: var(--ink); font: 15px/1.45 var(--ui); }
+  button, input { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+  .shell { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 28px; max-width: 1380px;
+           margin: 0 auto; padding: 24px 20px 120px; }
+  @media (max-width: 860px) { .shell { grid-template-columns: 1fr; } .stick { position: static !important; } }
+
+  /* ---- the LCD: 3 rows of 16 cells, blue backlight, dark characters, like the one on the throttle ---- */
+  .lcd { background: var(--lcd); border-radius: 6px; padding: 10px 12px; display: grid; gap: 3px;
+         box-shadow: inset 0 0 0 1px rgba(0,0,0,.35), inset 0 0 22px rgba(255,255,255,.22), 0 0 0 6px #232a36; }
+  .lcd .row { display: grid; grid-template-columns: repeat(16, 1fr); gap: 2px; }
+  .lcd .row span { background: var(--lcd-ghost); color: var(--lcd-ink); font: 600 1em/1.35 var(--mono);
+                   text-align: center; white-space: pre; min-width: 0; }
+  .lcd.big { font-size: 19px; }
+  .lcd.small { font-size: 13px; padding: 7px 8px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.35), 0 0 0 4px #232a36; }
+
+  .stick { position: sticky; top: 24px; align-self: start; display: grid; gap: 18px; }
+  .stick h1 { font-size: 22px; font-weight: 600; margin: 0 0 2px; letter-spacing: -.01em; }
+  .stick p { margin: 0; color: var(--quiet); }
+  .status { display: grid; gap: 4px; font-size: 13.5px; color: var(--quiet); }
+  .status b { color: var(--ink); font-weight: 600; }
+  .status .path { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
+  .recent { margin: 0; padding: 0; list-style: none; font: 13px/1.6 var(--mono); }
+  h2 { font-size: 14px; font-weight: 600; margin: 0 0 6px; }
+
+  /* ---- tabs ---- */
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--rule); margin-bottom: 20px; }
+  .tabs button { background: none; border: 0; padding: 10px 14px; border-bottom: 3px solid transparent;
+                 margin-bottom: -1px; cursor: pointer; color: var(--quiet); font-weight: 600; }
+  .tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--lcd); }
+  .lead { color: var(--quiet); max-width: 68ch; margin: 0 0 18px; }
+
+  /* ---- page editor ---- */
+  .editor { display: grid; grid-template-columns: minmax(0, 1fr) 270px; gap: 24px; align-items: start; }
+  @media (max-width: 1180px) { .editor { grid-template-columns: 1fr; } }
+  .page { background: var(--plate); border: 1px solid var(--rule); border-radius: 8px; padding: 14px;
+          display: grid; grid-template-columns: 232px minmax(0, 1fr); gap: 16px; margin-bottom: 12px; }
+  @media (max-width: 640px) { .page { grid-template-columns: 1fr; } }
+  .page .side { display: grid; gap: 10px; align-content: start; }
+  .page .tools { display: flex; gap: 6px; flex-wrap: wrap; }
+  .page .pos { font-size: 13px; color: var(--quiet); }
+  .field-row { display: grid; gap: 3px; margin-bottom: 8px; }
+  .field-row label { font-size: 12.5px; color: var(--quiet); }
+  input[type=text] { width: 100%; background: var(--aluminium); border: 1px solid var(--rule); border-radius: 5px;
+                     padding: 7px 9px; }
+  input.tpl { font: 13.5px var(--mono); }
+  input.title { font: 600 14px var(--mono); max-width: 14ch; text-transform: uppercase; }
+  input.bad { border-color: var(--amber); background: var(--amber-bg); }
+  .hint { font-size: 12.5px; color: var(--quiet); min-height: 1.2em; }
+  .hint.bad { color: var(--amber); }
+  .btn { white-space: nowrap; background: var(--plate); border: 1px solid var(--rule); border-radius: 5px; padding: 6px 11px; cursor: pointer; }
+  .btn:hover { border-color: var(--ink); }
+  .btn.primary { background: var(--lcd); border-color: var(--lcd); color: #fff; font-weight: 600; }
+  .btn:disabled { opacity: .45; cursor: default; border-color: var(--rule); }
+  .btn.small { padding: 3px 8px; font-size: 13px; }
+
+  .picker { position: sticky; top: 24px; max-height: calc(100vh - 140px); overflow: auto; background: var(--plate);
+            border: 1px solid var(--rule); border-radius: 8px; padding: 12px; }
+  .picker h3 { font-size: 13px; font-weight: 600; margin: 12px 0 4px; color: var(--quiet); }
+  .picker h3:first-of-type { margin-top: 6px; }
+  .picker button { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 4px 6px;
+                   border-radius: 4px; cursor: pointer; font-size: 13.5px; }
+  .picker button:hover { background: var(--aluminium); }
+  .picker details { margin-top: 12px; font-size: 13px; color: var(--quiet); }
+  .picker code { font: 12.5px var(--mono); color: var(--ink); }
+
+  /* ---- events ---- */
+  .groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+  fieldset { border: 1px solid var(--rule); border-radius: 8px; background: var(--plate); margin: 0; padding: 10px 14px 12px; }
+  legend { font-weight: 600; padding: 0 6px; }
+  fieldset .all { display: flex; justify-content: flex-end; gap: 4px; margin: -2px 0 4px; }
+  .check { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: baseline; padding: 3px 0; }
+  .check code { font: 12px var(--mono); color: var(--quiet); }
+  .keys { margin-top: 22px; display: grid; gap: 12px; max-width: 760px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { font: 12.5px var(--mono); background: var(--plate); border: 1px solid var(--rule); border-radius: 99px;
+          padding: 3px 4px 3px 10px; display: inline-flex; gap: 6px; align-items: center; }
+  .chip button { border: 0; background: none; cursor: pointer; padding: 0 6px; font-size: 14px; }
+  .addkey { display: flex; gap: 8px; max-width: 420px; }
+
+  /* ---- save bar ---- */
+  .savebar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--plate); border-top: 1px solid var(--rule);
+             padding: 12px 20px; display: flex; gap: 12px; align-items: center; justify-content: flex-end; }
+  .savebar .msg { margin-right: auto; color: var(--quiet); }
+  .savebar .msg.bad { color: var(--amber); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="stick" aria-label="The stick right now">
+    <div>
+      <h1>X52 MFD setup</h1>
+      <p>What the display on your throttle shows, and what you want it to show.</p>
+    </div>
+    <div>
+      <h2>On the stick now</h2>
+      <div class="lcd big" id="mirror" role="img" aria-label="Current MFD content"></div>
+    </div>
+    <div class="status" id="status"></div>
+    <div>
+      <h2>Latest in the event log</h2>
+      <ul class="recent" id="recent"><li>Nothing logged yet.</li></ul>
+    </div>
+  </aside>
+
+  <main>
+    <div class="tabs" role="tablist">
+      <button role="tab" id="tab-pages" aria-selected="true" aria-controls="panel-pages">Data pages, mode 1</button>
+      <button role="tab" id="tab-events" aria-selected="false" aria-controls="panel-events">Event log, mode 3</button>
+    </div>
+
+    <section id="panel-pages" role="tabpanel" aria-labelledby="tab-pages">
+      <p class="lead">Each page is three lines of 16 characters. Type plain text, and put a value where you want it
+        with a field in braces. Start/Stop and Reset on the stick step through the pages in this order.</p>
+      <div class="editor">
+        <div>
+          <div id="pages"></div>
+          <button class="btn" id="add-page">Add a page</button>
+          <button class="btn" id="restore-pages">Restore the built-in pages</button>
+        </div>
+        <div class="picker" id="picker" aria-label="Fields to insert"></div>
+      </div>
+    </section>
+
+    <section id="panel-events" role="tabpanel" aria-labelledby="tab-events" hidden>
+      <p class="lead">Tick what should make a line in the log. Unticked items are still watched, so the key press
+        behind them does not turn up as an unexplained event instead.</p>
+      <div class="groups" id="groups"></div>
+      <div class="keys">
+        <label class="check" style="grid-template-columns:auto 1fr">
+          <input type="checkbox" id="key-events">
+          <span>Show key presses that changed nothing the log knows about, as <code>EV FLAPS_DECR</code></span>
+        </label>
+        <div>
+          <h2>Key events to leave out</h2>
+          <div class="chips" id="ignored"></div>
+        </div>
+        <form class="addkey" id="add-ignored">
+          <input type="text" id="ignored-name" placeholder="BRAKES" aria-label="Key event name" autocomplete="off">
+          <button class="btn">Leave out</button>
+        </form>
+        <div>
+          <h2>Fired in the sim recently</h2>
+          <div class="chips" id="seen"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="savebar">
+  <span class="msg" id="msg"></span>
+  <button class="btn" id="discard" disabled>Discard changes</button>
+  <button class="btn primary" id="save" disabled>Save and apply</button>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const el = (tag, props = {}, ...kids) => {
+  const node = Object.assign(document.createElement(tag), props);
+  for (const kid of kids) node.append(kid);
+  return node;
+};
+const clone = (x) => JSON.parse(JSON.stringify(x));
+const api = async (path, body) => {
+  const res = await fetch(path, body === undefined ? {} : {
+    method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  return {ok: res.ok, data: await res.json()};
+};
+
+let server = null;     // /api/state
+let draft = null;      // the config being edited
+let errors = {};       // path -> message, from the last save or preview
+let lastInput = null;  // the template input a picked field goes into
+let previewTimer = 0;
+
+function lcd(node, lines) {
+  node.replaceChildren(...[0, 1, 2].map((r) => {
+    const text = (lines[r] || "").padEnd(16).slice(0, 16);
+    return el("div", {className: "row"}, ...[...text].map((ch) => el("span", {textContent: ch})));
+  }));
+}
+
+function dirty() { return JSON.stringify(draft) !== JSON.stringify(server.config); }
+function touched() {
+  const changed = dirty();
+  $("save").disabled = $("discard").disabled = !changed;
+  if (changed) say("Unsaved changes.");
+}
+function say(text, bad = false) { $("msg").textContent = text; $("msg").className = bad ? "msg bad" : "msg"; }
+
+/* ------------------------------------------------------------------ pages */
+function renderPages() {
+  const host = $("pages");
+  host.replaceChildren(...draft.page.map((page, p) => {
+    const screen = el("div", {className: "lcd small", id: `lcd-${p}`});
+    lcd(screen, []);
+    const move = (by) => () => {
+      const [item] = draft.page.splice(p, 1);
+      draft.page.splice(p + by, 0, item);
+      renderPages(); touched();
+    };
+    const tools = el("div", {className: "tools"},
+      el("button", {className: "btn small", textContent: "Move up", disabled: p === 0, onclick: move(-1)}),
+      el("button", {className: "btn small", textContent: "Move down", disabled: p === draft.page.length - 1, onclick: move(1)}),
+      el("button", {className: "btn small", textContent: "Remove", disabled: draft.page.length === 1, onclick: () => {
+        draft.page.splice(p, 1); renderPages(); touched(); }}));
+    const side = el("div", {className: "side"},
+      el("div", {className: "pos", textContent: `Page ${p + 1} of ${draft.page.length}`}), screen, tools);
+
+    const title = el("input", {type: "text", className: "title", value: page.title, maxLength: server.limits.title,
+      id: `title-${p}`, oninput: (e) => { page.title = e.target.value.toUpperCase(); touched(); }});
+    const form = el("div", {},
+      el("div", {className: "field-row"}, el("label", {htmlFor: `title-${p}`, textContent: "Name, shown when you switch to it"}),
+        title, el("div", {className: "hint", id: `hint-page.${p}.title`})));
+    page.lines.forEach((line, l) => {
+      const input = el("input", {type: "text", className: "tpl", value: line, id: `line-${p}-${l}`, spellcheck: false,
+        oninput: (e) => { page.lines[l] = e.target.value; touched(); schedulePreview(); },
+        onfocus: (e) => { lastInput = e.target; }});
+      form.append(el("div", {className: "field-row"},
+        el("label", {htmlFor: input.id, textContent: `Line ${l + 1}`}), input,
+        el("div", {className: "hint", id: `hint-page.${p}.lines.${l}`})));
+    });
+    return el("div", {className: "page"}, side, form);
+  }));
+  $("add-page").disabled = draft.page.length >= server.limits.pages;
+  preview();
+}
+
+function schedulePreview() { clearTimeout(previewTimer); previewTimer = setTimeout(preview, 180); }
+
+async function preview() {
+  if (!draft) return;
+  const asked = JSON.stringify(draft.page);
+  const {data} = await api("/api/preview", {pages: draft.page});
+  if (asked !== JSON.stringify(draft.page)) return;  // typed on since; a newer answer is coming
+  data.pages.forEach((page, p) => {
+    const screen = $(`lcd-${p}`);
+    if (!screen) return;
+    lcd(screen, page.lines.map((line) => line.text));
+    page.lines.forEach((line, l) => {
+      const hint = $(`hint-page.${p}.lines.${l}`), input = $(`line-${p}-${l}`);
+      const units = Object.entries(line.units).map(([name, unit]) => `${name}: ${unit || "unknown"}`).join(", ");
+      hint.textContent = line.error || units;
+      hint.className = line.error ? "hint bad" : "hint";
+      input.classList.toggle("bad", Boolean(line.error));
+    });
+  });
+}
+
+function renderPicker() {
+  const host = $("picker");
+  host.replaceChildren(el("h2", {textContent: "Insert a value"}),
+    el("p", {className: "hint", textContent: "Click in a line first, then pick what goes there."}));
+  let group = "";
+  for (const field of server.fields) {
+    if (field.group !== group) { group = field.group; host.append(el("h3", {textContent: group})); }
+    host.append(el("button", {textContent: field.label, title: field.template, onclick: () => insert(field.template)}));
+  }
+  const help = el("details", {}, el("summary", {textContent: "Writing a field by hand"}),
+    el("p", {}, "Any SimVar from Python-SimConnect works: ", el("code", {textContent: "{SIMVAR:5.0f}"}),
+      " takes a Python number format, ", el("code", {textContent: "{SIMVAR:1:5.0f}"}), " is engine or radio 1. Or use a filter:"));
+  for (const f of server.filters) help.append(el("p", {}, el("code", {textContent: `{SIMVAR|${f.name}}`}), ` ${f.help}`));
+  host.append(help);
+}
+
+function insert(text) {
+  const input = lastInput && document.contains(lastInput) ? lastInput : $("line-0-0");
+  const at = input.selectionStart ?? input.value.length;
+  input.setRangeText(text, at, input.selectionEnd ?? at, "end");
+  input.dispatchEvent(new Event("input"));
+  input.focus();
+}
+
+/* ------------------------------------------------------------------ events */
+function renderEvents() {
+  const hidden = new Set(draft.events.hidden);
+  const groups = new Map();
+  for (const rule of server.rules) (groups.get(rule.group) || groups.set(rule.group, []).get(rule.group)).push(rule);
+  $("groups").replaceChildren(...[...groups].map(([name, rules]) => {
+    const setAll = (show) => () => {
+      for (const rule of rules) show ? hidden.delete(rule.var) : hidden.add(rule.var);
+      draft.events.hidden = [...hidden]; renderEvents(); touched();
+    };
+    const box = el("fieldset", {}, el("legend", {textContent: name}),
+      el("span", {className: "all"},
+        el("button", {className: "btn small", textContent: "All", onclick: setAll(true)}),
+        el("button", {className: "btn small", textContent: "None", onclick: setAll(false)})));
+    for (const rule of rules) {
+      const tick = el("input", {type: "checkbox", checked: !hidden.has(rule.var), onchange: (e) => {
+        e.target.checked ? hidden.delete(rule.var) : hidden.add(rule.var);
+        draft.events.hidden = server.rules.map((r) => r.var).filter((v) => hidden.has(v)); touched(); }});
+      box.append(el("label", {className: "check"}, tick, el("span", {textContent: rule.label}),
+        el("code", {textContent: rule.example})));
+    }
+    return box;
+  }));
+  $("key-events").checked = draft.events.key_events;
+  $("ignored").replaceChildren(...(draft.events.ignored_key_events.length ? draft.events.ignored_key_events.map((name) =>
+    el("span", {className: "chip"}, name, el("button", {textContent: "×", title: `Show ${name} again`, onclick: () => {
+      draft.events.ignored_key_events = draft.events.ignored_key_events.filter((n) => n !== name);
+      renderEvents(); touched(); }}))) : [el("span", {className: "hint", textContent: "None. Every unexplained key event makes a line."})]));
+}
+
+function ignore(name) {
+  name = name.trim().toUpperCase();
+  if (!name || draft.events.ignored_key_events.includes(name)) return;
+  draft.events.ignored_key_events = [...draft.events.ignored_key_events, name].sort();
+  renderEvents(); touched();
+}
+
+/* ------------------------------------------------------------------ live mirror */
+async function live() {
+  try {
+    const {data} = await api("/api/live");
+    lcd($("mirror"), data.mfd || ["", "bridge starting", ""]);
+    const source = data.demo ? "Demo data" : data.sim ? "Connected to the sim" : "Waiting for the sim";
+    $("status").replaceChildren(
+      el("div", {}, el("b", {textContent: source})),
+      el("div", {textContent: data.mode ? `Mode selector on ${data.mode}, ${String(data.app || "").toLowerCase()}` : ""}),
+      el("div", {className: "path", textContent: server ? server.path : ""}));
+    const log = data.log || [];
+    $("recent").replaceChildren(...(log.length ? log.map((t) => el("li", {textContent: t})) : [el("li", {textContent: "Nothing logged yet."})]));
+    const seen = (data.key_events || []).filter((n) => !draft || !draft.events.ignored_key_events.includes(n));
+    $("seen").replaceChildren(...(seen.length ? seen.map((name) =>
+      el("span", {className: "chip"}, name, el("button", {textContent: "leave out", onclick: () => ignore(name)}))) :
+      [el("span", {className: "hint", textContent: "Nothing yet. Press something in the cockpit."})]));
+  } catch {
+    lcd($("mirror"), ["", "bridge stopped", ""]);
+    $("status").replaceChildren(el("div", {}, el("b", {textContent: "The bridge is not running"})),
+      el("div", {textContent: "Start it again and this page reconnects."}));
+  }
+}
+
+/* ------------------------------------------------------------------ load, save */
+function showErrors(list) {
+  errors = Object.fromEntries(list.map((e) => [e.path, e.message]));
+  for (const [path, message] of Object.entries(errors)) {
+    const hint = $(`hint-${path}`);
+    if (hint) { hint.textContent = message; hint.className = "hint bad"; }
+  }
+  const where = list.some((e) => e.path.startsWith("page")) ? "the pages" : "the event settings";
+  say(`Not saved: ${list.length === 1 ? list[0].message : `${list.length} problems in ${where}`}.`, true);
+}
+
+async function save() {
+  $("save").disabled = true;
+  const {ok, data} = await api("/api/config", draft);
+  if (!ok) { showErrors(data.errors || [{path: "", message: data.error || "the bridge refused it"}]); $("save").disabled = false; return; }
+  server.config = data.config;
+  draft = clone(data.config);
+  renderPages(); renderEvents(); touched();
+  say("Saved. The stick shows it now.");
+}
+
+async function load() {
+  server = (await api("/api/state")).data;
+  draft = clone(server.config);
+  renderPicker(); renderPages(); renderEvents(); touched();
+  say(server.file_error ? `The config file has a problem and is not in use: ${server.file_error}` : "", Boolean(server.file_error));
+}
+
+function showTab(tab) {
+  for (const other of document.querySelectorAll("[role=tab]")) {
+    other.setAttribute("aria-selected", String(other === tab));
+    $(other.getAttribute("aria-controls")).hidden = other !== tab;
+  }
+}
+for (const tab of document.querySelectorAll("[role=tab]")) tab.onclick = () => {
+  showTab(tab);
+  history.replaceState(null, "", tab.id === "tab-events" ? "#events" : "#pages");  // so a reload stays on the tab
+};
+if (location.hash === "#events") showTab($("tab-events"));
+$("add-page").onclick = () => { draft.page.push({title: `PAGE ${draft.page.length + 1}`, lines: ["", "", ""]}); renderPages(); touched(); };
+$("restore-pages").onclick = () => { draft.page = clone(server.defaults.page); renderPages(); touched(); };
+$("key-events").onchange = (e) => { draft.events.key_events = e.target.checked; touched(); };
+$("add-ignored").onsubmit = (e) => { e.preventDefault(); ignore($("ignored-name").value); $("ignored-name").value = ""; };
+$("save").onclick = save;
+$("discard").onclick = () => { draft = clone(server.config); renderPages(); renderEvents(); touched(); say(""); };
+window.addEventListener("beforeunload", (e) => { if (draft && dirty()) e.preventDefault(); });
+
+lcd($("mirror"), []);
+load().then(() => { live(); setInterval(live, 500); setInterval(() => { if (!$("panel-pages").hidden) preview(); }, 2000); });
+</script>
+</body>
+</html>

@@ -34,6 +34,9 @@ x52-simconnect = "x52_simconnect.bridge:main"
 [tool.setuptools]
 packages = ["x52_simconnect"]
 
+[tool.setuptools.package-data]
+x52_simconnect = ["config_ui.html"]
+
 [tool.ruff]
 line-length = 120
 extend-exclude = ["*.md"]

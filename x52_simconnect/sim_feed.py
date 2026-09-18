@@ -35,6 +35,19 @@ from SimConnect.Enum import (
 from .sim_events import SimEvents
 
 
+def simvar_units():
+    """Python-SimConnect's SimVar table as ``{"INDICATED_ALTITUDE": "Feet", "GENERAL_ENG_RPM:index": "Rpm"}``,
+    read without a connection. ``SimFeed`` can stream exactly these names (the config UI validates with it)."""
+    table = AircraftRequests(None, _time=0)
+    return {name: entry[2].decode() for group in table.list for name, entry in group.list.items()}
+
+
+def simvar_unit(name, units):
+    """The unit of ``name`` ("GENERAL_ENG_RPM:1") in ``units`` (from ``simvar_units``), or None if unknown."""
+    base, _, index = name.partition(":")
+    return units.get(f"{base}:index") if index else units.get(base)
+
+
 class _HookedSimConnect(SimConnect):
     """Python-SimConnect with hooks for SIMOBJECT_DATA packets (bulk definitions) and for key-event
     notifications with ids the package does not know (see sim_events.py)."""

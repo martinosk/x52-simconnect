@@ -7,6 +7,10 @@ MSFS 2024 -> X52 (non-Pro) MFD bridge: the CLI and the main loop.
   python -m x52_simconnect --cycle 5      # auto-advance pages every 5 s
   python -m x52_simconnect --mode 3       # force a mode, ignoring the stick's selector
   python -m x52_simconnect --events-banner  # flash each new event-log entry in the other modes too
+  python -m x52_simconnect --demo --no-stick  # no sim, no X52: try the config UI anywhere
+
+While it runs, http://127.0.0.1:8052 is the config UI: edit the mode 1 pages and choose what the mode 3
+event log shows (config_server.py; --ui-port, --no-ui, --config FILE).
 
 The rotary mode selector on the stick picks the app on the MFD: 1 = data pages, 2 = comms,
 3 = event log (see apps.py). A "MODE 2 COMMS" banner flashes on each change.
@@ -25,15 +29,18 @@ therefore force-redrawn shortly after every press and release, to restore what w
 import argparse
 import logging
 import time
+from collections import deque
 from datetime import datetime
 
 import usb.core
 
-from .apps import ALL_VARS, build_apps
+from . import config as cfg
+from .apps import build_apps, configure_apps, feed_vars
 from .buttons import BUTTON_NAMES, ButtonReader
 from .clock_sync import ClockSync
+from .config_server import DEFAULT_PORT, ConfigServer, ConfigStore
 from .display import MODES, Display
-from .mfd import X52Mfd
+from .mfd import NullMfd, X52Mfd
 from .saitek_driver import DriverModeReader
 from .sources import DemoSource, SimSource
 
@@ -116,6 +123,10 @@ def build_parser():
     ap.add_argument("--no-clock", action="store_true", help="leave the firmware clock/date alone")
     ap.add_argument("--no-auto-brightness", action="store_true", help="do not dim MFD/LEDs by time of day")
     ap.add_argument("--list-buttons", action="store_true", help="print valid button names and exit")
+    ap.add_argument("--config", metavar="FILE", help="config file (default: config.toml in the per-user app data)")
+    ap.add_argument("--ui-port", type=int, default=DEFAULT_PORT, help=f"config UI port (default {DEFAULT_PORT})")
+    ap.add_argument("--no-ui", action="store_true", help="do not serve the config UI")
+    ap.add_argument("--no-stick", action="store_true", help="run without an X52; the config UI mirrors the MFD")
     return ap
 
 
@@ -130,13 +141,53 @@ def parse_args(argv=None):
     return args
 
 
+def open_config(args):
+    """The ``ConfigStore`` for ``args`` and, unless switched off or the port is taken, the UI serving it."""
+    try:
+        from .sim_feed import simvar_unit, simvar_units  # the SimConnect package: Windows only
+
+        table = simvar_units()
+        store = ConfigStore(
+            args.config or cfg.default_path(),
+            known=lambda name: simvar_unit(name, table) is not None,
+            units=lambda name: simvar_unit(name, table),
+        )
+    except ImportError:
+        store = ConfigStore(args.config or cfg.default_path())
+    server = None
+    if not args.no_ui:
+        try:
+            server = ConfigServer(store, port=args.ui_port).start()
+            print(f"config UI: {server.url}  (file: {store.path})")
+        except OSError as e:
+            print(f"config UI not started on port {args.ui_port}: {e}")
+    return store, server
+
+
+def live_status(bridge, lines, values, demo, recent_events):
+    """What the config UI mirrors: the MFD as it is now, the newest log entries, the latest key events."""
+    return {
+        "mfd": lines,
+        "mode": bridge.display.mode,
+        "app": bridge.active.name,
+        "sim": values is not None,
+        "demo": demo,
+        "values": values,
+        "log": [text for _, text in list(bridge.apps[3].history)[:8]],
+        "key_events": list(recent_events),
+    }
+
+
 def run(args):
-    mfd = X52Mfd()
+    mfd = NullMfd() if args.no_stick else X52Mfd()
     display = Display(mfd)
-    src = DemoSource() if args.demo else SimSource()
+    store, server = open_config(args)
+    names = feed_vars(store.config)
+    src = DemoSource() if args.demo else SimSource(names)
+    recent_events = deque(maxlen=12)  # newest first, for the UI's "ignore this one" list
     clock = ClockSync(mfd, clock=not args.no_clock, brightness=not args.no_auto_brightness)
     buttons = selector = None
-    if not args.no_buttons:
+    if not args.no_buttons and not args.no_stick:
         buttons = ButtonReader()
         buttons.start()
         # Logitech's filter driver hides the selector from HID but answers for it itself (saitek_driver.py).
@@ -155,6 +206,7 @@ def run(args):
         home=args.home,
         cycle=args.cycle,
     )
+    configure_apps(apps, store.config)
     bridge = Bridge(display, apps, forced_mode=args.mode)
     usb_failures = 0
     display.show(["MSFS -> X52 MFD", "demo mode" if args.demo else "connecting...", ""], force=True)
@@ -171,10 +223,22 @@ def run(args):
             stick_mode = selector.read() if selector else None
             if stick_mode is None and buttons:
                 stick_mode = buttons.mode
-            values = src.read(ALL_VARS) if src.ensure() else None
+            new_config = store.take()
+            if new_config:
+                configure_apps(apps, new_config)
+                names = feed_vars(new_config)
+                src.set_names(names)
+                display.banner("CONFIG APPLIED")
+                log.info("config applied: %d pages, %d vars", len(new_config.pages), len(names))
+            values = src.read(names) if src.ensure() else None
             events = src.events() if values else []
+            for name in events:
+                if name in recent_events:
+                    recent_events.remove(name)
+                recent_events.appendleft(name)
             try:
-                bridge.step(presses, stick_mode, values, now=now, held=held, events=events)
+                lines = bridge.step(presses, stick_mode, values, now=now, held=held, events=events)
+                store.live = live_status(bridge, lines, values, args.demo, recent_events)
                 clock.update(values)
                 usb_failures = 0
             except usb.core.USBError as e:
@@ -192,6 +256,8 @@ def run(args):
     except KeyboardInterrupt:
         pass
     finally:
+        if server:
+            server.stop()
         if buttons:
             buttons.stop()
         if selector:
