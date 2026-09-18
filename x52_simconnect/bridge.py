@@ -32,7 +32,6 @@ import logging
 import sys
 import time
 from collections import deque
-from datetime import datetime
 
 import usb.core
 
@@ -42,7 +41,7 @@ from .apps import build_apps, configure_apps, feed_vars
 from .buttons import BUTTON_NAMES, FIRMWARE_BUTTONS, ButtonReader
 from .clock_sync import ClockSync
 from .config_server import DEFAULT_PORT, ConfigServer, ConfigStore
-from .display import MODES, Display
+from .display import MODES, WRITE_INTERVAL, Display
 from .mfd import NullMfd, X52Mfd
 from .sources import DemoSource, SimSource
 
@@ -52,9 +51,8 @@ USB_FAILURES_BEFORE_REOPEN = 3
 log = logging.getLogger(__name__)
 
 
-def waiting_screen(now=None):
-    now = now or datetime.now()
-    return ["MSFS 2024", "waiting for sim", now.strftime("%H:%M:%S")]
+def waiting_screen():
+    return ["MSFS 2024", "waiting for sim", ""]  # no ticking clock: every line write costs (see display.py)
 
 
 class Bridge:
@@ -121,6 +119,14 @@ def build_parser():
     ap.add_argument("--events-banner", action="store_true", help="flash new event-log entries in every mode")
     ap.add_argument("--no-clock", action="store_true", help="leave the firmware clock/date alone")
     ap.add_argument("--no-auto-brightness", action="store_true", help="do not dim MFD/LEDs by time of day")
+    ap.add_argument(
+        "--write-interval",
+        type=float,
+        default=WRITE_INTERVAL,
+        metavar="S",
+        help=f"seconds between MFD line writes that only follow changing values (default {WRITE_INTERVAL:g}); "
+        "line writes close together make the stick drop out for 1-2 s, so do not go much lower",
+    )
     ap.add_argument("--list-buttons", action="store_true", help="print valid button names and exit")
     ap.add_argument("--config", metavar="FILE", help="config file (default: config.toml in the per-user app data)")
     ap.add_argument("--ui-port", type=int, default=DEFAULT_PORT, help=f"config UI port (default {DEFAULT_PORT})")
@@ -166,7 +172,7 @@ def open_config(args):
 def live_status(bridge, lines, values, demo, recent_events):
     """What the config UI mirrors: the MFD as it is now, the newest log entries, the latest key events."""
     return {
-        "mfd": lines,
+        "mfd": [line or "" for line in bridge.display.on_screen],
         "mode": bridge.display.mode,
         "app": bridge.active.name,
         "sim": values is not None,
@@ -181,7 +187,7 @@ def run(args):
     if not args.no_stick and logitech_driver.installed():
         sys.exit("Logitech's X52 driver is installed: with it the stick freezes. Remove it first, see README.md.")
     mfd = NullMfd() if args.no_stick else X52Mfd()
-    display = Display(mfd)
+    display = Display(mfd, write_interval=args.write_interval)
     store, server = open_config(args)
     names = feed_vars(store.config)
     src = DemoSource() if args.demo else SimSource(names)
@@ -240,6 +246,7 @@ def run(args):
                 if usb_failures >= USB_FAILURES_BEFORE_REOPEN:
                     try:
                         mfd.reopen()
+                        display.forget()
                         print("reopened X52")
                     except Exception as e2:  # noqa: BLE001 - keep looping, the stick may come back
                         print(f"reopen failed: {e2}")

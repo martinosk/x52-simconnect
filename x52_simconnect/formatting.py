@@ -66,16 +66,6 @@ def hms(seconds):
     return f"{s // 3600:02d}:{s // 60 % 60:02d}:{s % 60:02d}"
 
 
-def age(seconds):
-    """Seconds elapsed -> a three-character column: ``" 3s"``, ``"41s"``, ``"12m"``, ``" 2h"`` (capped at 99h)."""
-    s = max(0, int(num(seconds)))
-    if s < 60:
-        return f"{s:2d}s"
-    if s < 3600:
-        return f"{s // 60:2d}m"
-    return f"{min(s // 3600, 99):2d}h"
-
-
 def clip(text):
     """Cut a line to the MFD width."""
     return str(text)[:LINE_LEN]

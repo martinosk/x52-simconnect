@@ -27,7 +27,7 @@ If you own an X52 **Pro**, use a DirectOutput-based tool instead, e.g.
 | Five pages: FLIGHT, RADIO, AUTOPILOT, ENGINE, POSITION | Working |
 | Paging with the MFD buttons, page banner | Working |
 | Mode selector 1/2/3 picks the app on the MFD (pages, comms, event log) | Working; mode 2 is a placeholder until spec 05 |
-| Event log (mode 3): flaps, gear, brakes, trim, throttle, lights, AP, radios, unexplained key presses, with age and scrolling | Working, verified in MSFS 2024 |
+| Event log (mode 3): flaps, gear, brakes, trim, throttle, lights, AP, radios, unexplained key presses, with scrolling | Working, verified in MSFS 2024 |
 | Firmware clock 1/2/3, date and MFD/LED brightness from sim time | Working |
 | Auto-reconnect when the sim starts/stops; recovery from transient USB errors | Working |
 | Comms, aircraft profiles, buttons -> sim events | Specified, see [SPECS.md](SPECS.md) |
@@ -35,8 +35,8 @@ If you own an X52 **Pro**, use a DirectOutput-based tool instead, e.g.
 ## Requirements
 - Windows 10/11, Python 3.11+ (developed on 3.14), MSFS 2024 or 2020 (any edition; the Store build works).
 - X52 non-Pro on Windows' own joystick driver. **Logitech's X52 software and driver must not be installed**: with
-  it, pressing stick buttons while the bridge runs freezes the MFD for half a minute at a time and makes the stick
-  drop out and re-calibrate in flight. The bridge refuses to start beside it. Removal is below; MSFS does not need it.
+  it, pressing stick buttons while the bridge runs garbles the MFD and freezes it for half a minute at a time.
+  The bridge refuses to start beside it. Removal is below; MSFS does not need it.
 - The **libusb-win32 filter driver** on the stick (one-time setup below). It sits *beside* the Windows HID driver,
   so the joystick keeps working in the sim. WinUSB/Zadig would replace the HID driver and break joystick input.
 
@@ -77,6 +77,7 @@ python -m x52_simconnect --cycle 5        # auto-advance pages
 python -m x52_simconnect --mode 3         # force a mode, ignore the stick's selector
 python -m x52_simconnect --events-banner  # flash each new event-log line in the other modes too
 python -m x52_simconnect --no-clock --no-auto-brightness
+python -m x52_simconnect --write-interval 3  # update the text less often (default 1 s), see Known limits
 python -m x52_simconnect --demo --no-stick  # no sim and no X52: try the config UI anywhere
 python -m x52_simconnect --next MOUSE_SCROLL_UP --prev MOUSE_SCROLL_DN   # remap paging; --list-buttons for names
 python -m x52_simconnect --help
@@ -92,7 +93,7 @@ page, scroll position) while another one is showing, and a `MODE 2 COMMS` banner
 |---|---|---|
 | 1 | Pages | The data pages: FLIGHT, RADIO, AUTOPILOT, ENGINE, POSITION |
 | 2 | Comms | Tuned station and ATC text, spec 05. Placeholder for now |
-| 3 | Events | The last things triggered in the cockpit, newest on top with its age (below) |
+| 3 | Events | The last things triggered in the cockpit, newest on top (below) |
 
 `--mode N` forces one app for testing, ignoring the selector. Until the stick sends its first report (any input
 change) the selector position is unknown and mode 1 is assumed.
@@ -120,11 +121,12 @@ display. The page is only served to the local machine.
 
 ### Event log (mode 3)
 ```
- 3s FLAPS 2
-41s PARK BRK OFF
-58s GEAR DOWN
+FLAPS 2
+PARK BRK OFF
+GEAR DOWN
 ```
-A rolling log of the last 100 cockpit actions, collected in every mode, each line with its age. Two sources:
+A rolling log of the last 100 cockpit actions, collected in every mode, newest on top. Nothing on it ticks: the
+screen only changes when something happens (see Known limits). Two sources:
 - **State changes** in the streaming feed (`event_rules.py`, a table of SimVar, wording and policy): flaps, gear,
   parking brake, spoilers, trim, throttle, propeller, mixture, starter, engine running, fuel pump and tank,
   lights, pitot heat, alternate static, anti-ice and de-ice, battery, alternator, avionics, autopilot modes,
@@ -140,7 +142,7 @@ A rolling log of the last 100 cockpit actions, collected in every mode, each lin
   actions are not logged twice.
 
 Buttons: **Start/Stop** = older entries, **Reset** = newer, **Reset held 1 s** = back to the newest. While
-scrolled, new entries do not move the view; `+3 NEW` replaces the age on line 1 instead. Turning the
+scrolled, new entries do not move the view; `+3 NEW` goes in front of line 1 instead. Turning the
 selector to 3 always shows the newest three. `--events-banner` also flashes each new line for 0.8 s while
 another mode is showing. In `--demo` a scripted departure and return plays through the log every 92 s.
 
@@ -175,7 +177,7 @@ Hardware and sim I/O live in three modules; everything else is plain Python that
 | `config.py` | The config file: pages and event-log choices, validation with per-input error paths, TOML load and save, the field catalogue. | - |
 | `event_rules.py` | The event log's rule table (SimVar, wording, change/settled/step policy) the engine that turns feed values into log lines, and the filter for which key events are worth a notification. | - |
 | `apps.py` | One app per selector position (`PagesApp`, `EventLogApp`, placeholder `CommsApp`) behind one `App` protocol; `ALL_VARS`, the union of what they need. | - |
-| `display.py` | `Display`: the one writer of MFD text, with the banner, the forced redraw and the current mode. | - |
+| `display.py` | `Display`: the one writer of MFD text, with the banner, the forced redraw, the current mode and the write budget that keeps line writes rare. | - |
 | `clock_sync.py` | Firmware clock/date and brightness from sim time. | - |
 | `sources.py` | `SimSource` (live, with reconnect) and `DemoSource` (fake data) behind one `ensure`/`read`/`close` interface. | - |
 | `bridge.py` | CLI and the main loop; `Bridge.step` is its pure body (mode switching, button routing, rendering). | - |
@@ -200,6 +202,13 @@ need a check on the real stick or a live flight; `--demo` is the quickest hardwa
 New features are written up as specs first, see [SPECS.md](SPECS.md).
 
 ## Known limits
+- **Writing MFD text can make the whole X52 stop reporting for 1-2 seconds**, after which the stick re-calibrates.
+  It is the stick's firmware, and it comes with line writes (each needs a "clear line" command; clock, date and
+  brightness writes are harmless). Several lines written back to back caused it steadily, an outage every 40 seconds
+  in a busy flight; single lines a second apart have caused none so far. The bridge therefore never writes two lines in the same tick: lines that follow changing
+  values go out one at a time, `--write-interval` seconds apart (default 1), and a page or mode change, a scroll or
+  a new event goes out over three ticks. Nothing on screen ticks by itself. `python tools/trace_bridge.py` runs the
+  bridge with a recorder and reports the outages of a flight against its line writes.
 - USB control transfers to the stick fail sporadically with Windows error 31 ("A device attached to the system is
   not functioning"), typically near a firmware-handled button press. Retried, never fatal.
 - libusb-win32 is unmaintained (last release 2021, still WHQL-signed and working on Windows 11).

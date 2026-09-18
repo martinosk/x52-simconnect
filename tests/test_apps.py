@@ -14,6 +14,9 @@ class BannerSpy:
     def banner(self, text):
         self.banners.append(text)
 
+    def urgent(self):
+        self.urgents = getattr(self, "urgents", 0) + 1
+
 
 def test_all_vars_is_unique_and_covers_every_app_and_the_clock():
     assert len(ALL_VARS) == len(set(ALL_VARS))
@@ -41,10 +44,10 @@ def test_every_app_renders_with_demo_and_with_no_data(fake_mfd, mode):
         assert all(isinstance(line, str) and len(line) <= LINE_LEN for line in lines)
 
 
-def test_placeholder_and_empty_log_show_name_and_sim_time(fake_mfd):
+def test_placeholder_and_empty_log_show_their_name_and_nothing_that_ticks(fake_mfd):
     apps = build_apps(Display(fake_mfd))
-    assert apps[2].render(demo_values(0)) == ["COMMS", "see spec 05", "Z 12:00:00"]
-    assert apps[3].render(dict.fromkeys(ALL_VARS)) == ["EVENTS", "no events yet", "Z --:--:--"]
+    assert apps[2].render(demo_values(0)) == ["COMMS", "see spec 05", ""]
+    assert apps[3].render(dict.fromkeys(ALL_VARS)) == ["EVENTS", "no events yet", ""]
 
 
 def test_pages_app_wraps_both_ways_and_reports_changes():
@@ -112,17 +115,17 @@ def fill(app, texts, start=1.0, step=1.0):
 
 def test_event_log_starts_empty():
     app = event_log()
-    assert app.render(demo_values(0)) == ["EVENTS", "no events yet", "Z 12:00:00"]
+    assert app.render(demo_values(0)) == ["EVENTS", "no events yet", ""]
 
 
-def test_event_log_lines_from_the_feed_newest_first_with_age():
+def test_event_log_lines_from_the_feed_newest_first_and_unchanged_by_time():
     app = event_log()
     app.observe(demo_values(3), 3.0)  # BATTERY ON
     app.observe(demo_values(5), 5.0)  # BEACON ON
     app.observe(demo_values(5), 8.0)
-    assert app.render(demo_values(8)) == [" 3s BEACON ON", " 5s BATTERY ON", ""]
+    assert app.render(demo_values(8)) == ["BEACON ON", "BATTERY ON", ""]
     app.observe(demo_values(5), 125.0)
-    assert app.render(demo_values(125)) == [" 2m BEACON ON", " 2m BATTERY ON", ""]
+    assert app.render(demo_values(125)) == ["BEACON ON", "BATTERY ON", ""]
 
 
 def test_event_log_keeps_collecting_while_not_showing_and_activation_shows_newest():
@@ -132,7 +135,7 @@ def test_event_log_keeps_collecting_while_not_showing_and_activation_shows_newes
     app.on_button("START_STOP")
     app.on_activate()
     app.observe(None, 10.0)
-    assert app.render({}) == [" 5s E", " 6s D", " 7s C"]
+    assert app.render({}) == ["E", "D", "C"]
     assert app.showing
 
 
@@ -145,9 +148,9 @@ def test_event_log_scrolls_older_and_newer_within_bounds():
     for _ in range(5):
         app.on_button("START_STOP")
     assert app.scroll == 2  # the oldest entry is on line 3, no further
-    assert app.render({}) == [" 7s C", " 8s B", " 9s A"]
+    assert app.render({}) == ["C", "B", "A"]
     app.on_button("RESET")
-    assert app.render({}) == [" 6s D", " 7s C", " 8s B"]
+    assert app.render({}) == ["D", "C", "B"]
 
 
 def test_new_entries_while_scrolled_keep_the_view_and_show_a_marker():
@@ -156,17 +159,17 @@ def test_new_entries_while_scrolled_keep_the_view_and_show_a_marker():
     app.on_button("START_STOP")
     app.on_button("START_STOP")
     app.observe(None, 10.0)
-    assert app.render({}) == [" 7s C", " 8s B", " 9s A"]
+    assert app.render({}) == ["C", "B", "A"]
     app.add(10.0, "F")
     app.add(10.0, "G")
-    assert app.render({}) == ["+2 NEW C", " 8s B", " 9s A"]  # same entries on screen
+    assert app.render({}) == ["+2 NEW C", "B", "A"]  # same entries on screen
     app.on_button("RESET")
-    assert app.render({}) == ["+2 NEW D", " 7s C", " 8s B"]
+    assert app.render({}) == ["+2 NEW D", "C", "B"]
     app.on_button("RESET")
     app.on_button("RESET")
-    assert app.render({}) == ["+1 NEW F", " 5s E", " 6s D"]  # one newer entry still above the view
+    assert app.render({}) == ["+1 NEW F", "E", "D"]  # one newer entry still above the view
     app.on_button("RESET")
-    assert app.render({}) == [" 0s G", " 0s F", " 5s E"]
+    assert app.render({}) == ["G", "F", "E"]
     assert app.unseen == 0
 
 
@@ -270,5 +273,16 @@ def test_event_log_lines_fit_the_display():
     app.observe(dict.fromkeys(ALL_VARS), 1.0, events=["TOGGLE_MASTER_ALTERNATOR"])
     app.observe(dict.fromkeys(ALL_VARS), 2.0)
     lines = app.render(dict.fromkeys(ALL_VARS))
-    assert lines[0] == " 0s EV TOGGLE_MA"
+    assert lines[0] == "EV TOGGLE_MASTER"
     assert all(len(line) <= LINE_LEN for line in lines)
+
+
+def test_new_entries_while_showing_and_scrolling_go_out_at_once():
+    app = event_log()
+    app.add(1.0, "GEAR UP")  # another app is showing: nothing to hurry
+    assert not getattr(app.display, "urgents", 0)
+    app.on_activate()
+    seen = app.display.urgents
+    app.add(2.0, "FLAPS 1")
+    app.on_button("START_STOP")
+    assert app.display.urgents == seen + 2

@@ -6,7 +6,7 @@ from x52_simconnect import event_rules as er
 from x52_simconnect.apps import ALL_VARS
 from x52_simconnect.sources import DEMO_TIMELINE, demo_values
 
-MAX_TEXT = 12  # 16 columns minus the 3-character age column and a space
+MAX_TEXT = 12  # the rule texts are kept this short
 
 
 def engine(*rules):

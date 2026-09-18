@@ -78,9 +78,10 @@ subclass in `x52_simconnect/sim_feed.py` to look up ours first.
 `x52_simconnect/apps.py`, `x52_simconnect/sim_events.py` (`SimEvents.subscribe/take/send`), the event branch
 of the dispatch hook in `sim_feed.py`, `--events-banner`, the scripted demo timeline in `sources.py`.
 Deviations from the text above:
-- The age column is three characters (` 3s`, `41s`, `12m`, ` 2h`) plus a space, leaving 12 for the text, so
-  every wording in the table fits without clipping (`PARK BRK OFF`, `COM1 118.750`, `ALT SEL 5000`).
-  `EV` lines with long event names are clipped by the display.
+- **The age column is gone** (it was ` 3s`, `41s`, `12m` in front of each line). It made every visible line change
+  once a second, and line writes that come close together make the X52 drop out for 1-2 s (README, Known limits).
+  The log now only changes when something happens; a `+3 NEW` marker still goes in front of line 1 while scrolled.
+  The wordings stay within 12 characters; `EV` lines with long event names are clipped by the display.
 - The `App` protocol gained `observe(values, now, events)` (every tick, every app, so the log collects while
   another mode shows), `on_hold(name, seconds)` (for Reset held) and `on_deactivate()` (for the banner
   mirror). `Bridge.step` takes `held` and `events`.

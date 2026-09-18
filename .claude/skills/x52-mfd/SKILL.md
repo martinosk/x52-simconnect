@@ -53,11 +53,39 @@ the system is not functioning.` (Windows error 31). It is transient. Retry each 
 the line as unknown on failure so it gets rewritten, and if several writes in a row fail, dispose the handle and
 `usb.core.find` the stick again (`X52Mfd.reopen`). Never let one failed transfer kill the app.
 
+**The line-clear command can knock the whole X52 out for 1-2 s** (measured 2026-09 by recording every HID report
+while varying the traffic; stock Windows driver, two USB ports). Symptom in flight: the stick's LEDs go out for a
+moment, *no* HID reports at all arrive (throttle included), then X/Y jump as the stick re-calibrates. No USB error,
+no Kernel-PnP event. Outage lengths are quantised in ~0.27 s steps (0.68, 0.95, 1.22 ... 2.4 s), so it looks like a
+retrying timeout inside the firmware.
+- Cause is the clear (`line | 0x08`), not the amount of text and not USB traffic as such: flooding clears alone
+  silenced the stick 24.7 s of 25; clear + full line (fewer clears/s, most characters) was the mildest text flood;
+  153,000 brightness writes or 128,000 clock writes in 25-30 s did next to nothing.
+- There is no way to rewrite a line without the clear: characters past the 16th are ignored, and the write position
+  is shared by all three lines and only a clear resets it (clear all three, fill line 1, and writes to lines 2 and 3
+  are ignored).
+- Pacing the transfers does not help (same or worse than bursts at the same volume). Rough risk under floods:
+  0.5-1 % per clear; one line 4x/s gave no outage in a minute. What the pilot moves (stick half, throttle, nothing)
+  showed no consistent effect. Not power: full-brightness and 0<->128 toggling at 2,500/s were harmless.
+- In a real 5-minute hand-flown flight: 376 line writes/min, 8 outages, about 1 per 250 line writes. Coming out of
+  an outage the first report can show an axis at its extreme (twist off by 512, Y by 1023) while the stick
+  re-calibrates, so an outage is not harmless with the autopilot on either.
+- What seems to matter is how close together the clears come, more than their number: one line 4x/s gave no
+  outage in 240 writes, and a flight in mode 2 (one line a second, a text clock) had none, while three lines back
+  to back 4x/s gave them steadily, as did the bridge when it wrote every changed line in the same tick. Not
+  proven; check with `tools/trace_bridge.py` after any change to the write pattern.
+- Consequence: never write two lines back to back, and nothing on screen may tick by itself (no text clocks, no
+  ages). `Display.show` writes at most one line per call (= per 0.25 s loop tick): lines that follow changing
+  values go out `write_interval` (1 s) apart, longest-waiting first; a banner, `urgent()` (scrolling, new events)
+  and the forced redraw after a firmware button write each differing line once on consecutive ticks, top first.
+  Prefer the firmware clock/date fields for anything that must change often. `tools/trace_bridge.py` runs the bridge with a recorder (HID reports + every vendor
+  transfer) and reports outages against line writes; outages only show while the pilot is moving something.
+
 ## 3. Windows driver stack and why libusb-1.0 fails
 
 **Logitech's X52 software/driver (8.0.116.0: `SaiK075C`, `SaiU075C`, `sai075c.inf`) must not be installed.** It
 writes to the MFD itself on every button press, and with two writers the stick's vendor requests time out for
-~30 s at a time after a few seconds of button use (garbled MFD text, stick blanking and re-calibrating in flight).
+~30 s at a time after a few seconds of button use (garbled MFD text, frozen MFD).
 It also zeroes the mode-selector bits in the HID reports. `logitech_driver.installed()` detects it and the bridge
 refuses to start. Without it, 20 s of hammering buttons under 108 transfers/s: every transfer 1-2 ms, none failed.
 - Remove: uninstalling "Logitech X52" from the app list leaves the driver bound. Admin shell:

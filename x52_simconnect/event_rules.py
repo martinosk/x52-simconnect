@@ -62,7 +62,7 @@ def step(size, debounce=SETTLE_SECONDS):
 class Rule:
     var: str
     key: Callable  # raw SimVar value -> comparable state (bool, int, float)
-    text: Callable  # state -> log line, at most 12 characters (3 for the age column, 1 space)
+    text: Callable  # state -> log line, kept to 12 characters
     policy: Policy
     label: str = ""  # what the config UI calls it
     group: str = ""  # and the heading it is listed under

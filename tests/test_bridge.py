@@ -39,9 +39,9 @@ def test_selector_switches_app_with_banner_then_shows_the_app(fake_mfd):
     bridge = make_bridge(fake_mfd)
     bridge.step(stick_mode=1, values=VALUES, now=0)
     lines = bridge.step(stick_mode=2, values=VALUES, now=1)
-    assert lines == ["MODE 2 COMMS", "see spec 05", "Z 12:00:00"]
+    assert lines == ["MODE 2 COMMS", "see spec 05", ""]
     lines = bridge.step(stick_mode=2, values=VALUES, now=2)
-    assert lines == ["COMMS", "see spec 05", "Z 12:00:00"]
+    assert lines == ["COMMS", "see spec 05", ""]
     lines = bridge.step(stick_mode=3, values=VALUES, now=3)
     assert lines[0] == "MODE 3 EVENTS"
     assert bridge.step(stick_mode=3, values=VALUES, now=4)[0] == "EVENTS"
@@ -83,25 +83,46 @@ def test_forced_mode_ignores_the_selector(fake_mfd):
     assert bridge.display.mode == 3
 
 
-def forces(fake_mfd):
-    return [args[1] for name, args in fake_mfd.calls if name == "set_lines"]
+def written(fake_mfd):
+    """The line index of every line write, in order."""
+    return [args[0] for name, args in fake_mfd.calls if name == "set_line"]
 
 
-def test_firmware_buttons_force_a_redraw_after_the_delay(fake_mfd):
-    bridge = make_bridge(fake_mfd)
+def settled(fake_mfd, **options):
+    """A bridge whose first screen is on the MFD already, with the fake's log emptied."""
+    bridge = make_bridge(fake_mfd, **options)
+    for now in (-3.0, -2.0, -1.0):
+        bridge.step(stick_mode=1, values=VALUES, now=now)
+    fake_mfd.calls.clear()
+    return bridge
+
+
+def test_firmware_buttons_hold_writes_then_redraw_all_three_lines_a_tick_apart(fake_mfd):
+    bridge = settled(fake_mfd)
     bridge.step(presses=["START_STOP"], stick_mode=1, values=VALUES, now=0)
     bridge.step(stick_mode=1, values=VALUES, now=0.2)
-    bridge.step(stick_mode=1, values=VALUES, now=0.3)
-    assert forces(fake_mfd) == [False, False, True]
+    assert written(fake_mfd) == []  # the firmware is about to draw over it
+    for now in (0.3, 0.55, 0.8, 1.05):
+        bridge.step(stick_mode=1, values=VALUES, now=now)
+    assert written(fake_mfd)[:3] == [0, 1, 2]
 
 
-def test_other_buttons_and_mode_changes_force_nothing(fake_mfd):
-    bridge = make_bridge(fake_mfd)
+def test_other_buttons_cost_no_writes_and_a_mode_change_goes_out_a_line_per_tick(fake_mfd):
+    bridge = settled(fake_mfd)
     bridge.step(presses=["FIRE"], stick_mode=1, values=VALUES, held=["FIRE"], now=0)
-    bridge.step(stick_mode=1, values=VALUES, held=[], now=0.3)
-    bridge.step(stick_mode=2, values=VALUES, now=1)
-    bridge.step(stick_mode=2, values=VALUES, now=1.3)
-    assert forces(fake_mfd) == [False] * 4
+    bridge.step(stick_mode=1, values=VALUES, held=[], now=0.25)
+    assert written(fake_mfd) == []
+    for now in (1.0, 1.25, 1.5):
+        bridge.step(stick_mode=2, values=VALUES, now=now)
+    assert written(fake_mfd) == [0, 1, 2]
+    assert bridge.display.on_screen == ["MODE 2 COMMS", "see spec 05", ""]
+
+
+def test_live_values_go_out_one_line_per_write_interval(fake_mfd):
+    bridge = settled(fake_mfd)
+    for i in range(41):  # 10 s of a moving demo flight at 4 Hz
+        bridge.step(stick_mode=1, values=demo_values(i * 0.25), now=i * 0.25)
+    assert len(written(fake_mfd)) <= 11  # one a second, never two in a tick
 
 
 def test_cycle_advances_pages_while_in_mode_1(fake_mfd):
@@ -148,14 +169,14 @@ def test_event_log_collects_in_the_background_and_shows_on_mode_3(fake_mfd):
     bridge.step(stick_mode=1, values=demo_values(3), now=3)  # BATTERY ON while showing the pages
     assert bridge.step(stick_mode=1, values=demo_values(5), now=5) == render(PAGES[0], demo_values(5))
     bridge.step(stick_mode=3, values=demo_values(5), now=6)  # banner
-    assert bridge.step(stick_mode=3, values=demo_values(5), now=7) == [" 2s BEACON ON", " 4s BATTERY ON", ""]
+    assert bridge.step(stick_mode=3, values=demo_values(5), now=7) == ["BEACON ON", "BATTERY ON", ""]
 
 
 def test_events_reach_the_log_and_show_as_ev_when_unexplained(fake_mfd):
     bridge = make_bridge(fake_mfd, forced_mode=3)
     bridge.step(values=VALUES, now=0)
     bridge.step(values=VALUES, now=1, events=["FLAPS_DECR"])
-    assert bridge.step(values=VALUES, now=1.5)[0] == " 0s EV FLAPS_DEC"  # clipped to the display
+    assert bridge.step(values=VALUES, now=1.5)[0] == "EV FLAPS_DECR"
 
 
 def test_held_reset_jumps_to_the_newest_entry(fake_mfd):
@@ -171,7 +192,7 @@ def test_held_reset_jumps_to_the_newest_entry(fake_mfd):
     assert log.scroll == 2
     lines = bridge.step(values=VALUES, held=["RESET"], now=8)
     assert log.scroll == 0
-    assert lines[0] == " 3s F"
+    assert lines[0] == "F"
     bridge.step(values=VALUES, held=[], now=8.25)  # released
     assert bridge._down == {}
 

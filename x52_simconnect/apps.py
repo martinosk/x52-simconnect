@@ -12,7 +12,7 @@ from collections import deque
 from itertools import islice
 
 from .event_rules import RULES, VARS, RuleEngine
-from .formatting import age, clip, hms
+from .formatting import clip
 from .pages import CLOCK_VARS, PAGES, render
 
 log = logging.getLogger(__name__)
@@ -113,31 +113,33 @@ class PagesApp(App):
 
 
 class CommsApp(App):
-    """Mode 2 placeholder: shows its name and sim time until spec 05 fills it in."""
+    """Mode 2 placeholder: shows its name until spec 05 fills it in."""
 
     name = "COMMS"
-    vars = ("ZULU_TIME",)
 
     def render(self, values):
-        return [self.name, "see spec 05", f"Z {hms(values.get('ZULU_TIME'))}"]
+        return [self.name, "see spec 05", ""]
 
 
 class EventLogApp(App):
-    """Mode 3: the last cockpit actions, newest on top, each with its age::
+    """Mode 3: the last cockpit actions, newest on top::
 
-         3s FLAPS 2
-        41s PARK BRK OFF
-        58s GEAR DOWN
+        FLAPS 2
+        PARK BRK OFF
+        GEAR DOWN
+
+    No ages or times: the screen must only change when something happens, because line writes are rationed
+    (see display.py).
 
     Lines come from ``event_rules.RuleEngine`` (SimVar changes) and, when no rule explains a key event within
     ``KEY_EVENT_GRACE`` seconds, from the event itself as ``EV FLAPS_INCR``. The log keeps collecting while
     another app is showing. Start/Stop scrolls to older entries, Reset to newer ones, Reset held for
     ``HOLD_SECONDS`` jumps back to the newest. New entries while scrolled do not move the view; a ``+3 NEW``
-    marker replaces the age column on line 1 instead. With ``mirror`` the newest entry also flashes as a
+    marker goes in front of line 1 instead. With ``mirror`` the newest entry also flashes as a
     banner while another app is showing."""
 
     name = "EVENTS"
-    vars = (*VARS, "ZULU_TIME")
+    vars = VARS
     HISTORY = 100
     VISIBLE = 3
     KEY_EVENT_GRACE = 0.3  # a key event waits this long for a rule to explain it before it is logged as EV
@@ -192,7 +194,9 @@ class EventLogApp(App):
         if self.scroll:
             self.scroll = min(self.scroll + 1, self.max_scroll)  # keep what is on screen where it is
             self.unseen += 1
-        if self.mirror and not self.showing:
+        if self.showing:
+            self.display.urgent()
+        elif self.mirror:
             self.display.banner(text)
         log.info("event: %s", text)
 
@@ -205,9 +209,11 @@ class EventLogApp(App):
         self.scroll = max(0, min(self.scroll + delta, self.max_scroll))
         if not self.scroll:
             self.unseen = 0
+        self.display.urgent()
 
     def newest(self):
         self.scroll = self.unseen = 0
+        self.display.urgent()
 
     def on_button(self, name):
         if name == self.older:
@@ -231,13 +237,12 @@ class EventLogApp(App):
     # ------------------------------------------------------------------ rendering
     def render(self, values):
         if not self.history:
-            return [self.name, "no events yet", f"Z {hms(values.get('ZULU_TIME'))}"]
+            return [self.name, "no events yet", ""]
         lines = []
-        for i, (t, text) in enumerate(islice(self.history, self.scroll, self.scroll + self.VISIBLE)):
-            column = age(self._now - t)
+        for i, (_, text) in enumerate(islice(self.history, self.scroll, self.scroll + self.VISIBLE)):
             if i == 0 and self.scroll and self.unseen:
-                column = f"+{min(self.unseen, self.scroll)} NEW"
-            lines.append(clip(f"{column} {text}"))
+                text = f"+{min(self.unseen, self.scroll)} NEW {text}"
+            lines.append(clip(text))
         return lines + [""] * (self.VISIBLE - len(lines))
 
 
