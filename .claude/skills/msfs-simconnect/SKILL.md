@@ -100,12 +100,35 @@ dispatch thread as `SIMCONNECT_RECV_ID_EVENT` (`SIMCONNECT_RECV_EVENT.uEventID`,
   the mouse only showed up as its SimVar changing, so do not rely on notifications for mouse interaction.
   `python -m x52_simconnect.sim_events` prints whatever arrives.
 - Only subscribe to discrete events (`FLAPS_INCR`, `GEAR_TOGGLE`, `AP_MASTER`, ...). `AXIS_*` and `*_SET`
-  events fire every frame from bound axes; see `event_rules.KEY_EVENTS`.
+  events fire every frame from bound axes; see `event_rules.loggable`.
+- Subscribing to everything discrete is cheap (verified live 2026-09): 832 names from the package's
+  `EventList.py` mapped and grouped in ~0.1 s, and 20 s in an idle cockpit delivered no notification at all.
+  `sim_events.all_key_events()` is that list minus view/slew/ATC/multiplayer/mission groups (704 names).
+  The table can be read without a connection: the groups are nested classes of `AircraftEvents`
+  (`EventHelper` subclasses), each with a `.list` of `(b"NAME", description, scope)`. The instance's own
+  `.list` of groups leaves out `G1000_PFD` and `G1000_MFD`.
+  The table also has placeholder rows named `Not supported` and `Unsupported`; skip anything that is not
+  `[A-Z0-9_]+`.
+- Three names in the package's table get `SIMCONNECT_EXCEPTION_NAME_UNRECOGNIZED` from MSFS 2024:
+  `KEY_PRESSURIZATION_PRESSURE_ALT_INC`, `KEY_PRESSURIZATION_PRESSURE_ALT_DEC`,
+  `PRESSURIZATION_PRESSURE_DUMP_SWTICH` (`event_rules.REJECTED_EVENTS`). The exception arrives asynchronously
+  and its `dwSendID` did not match `GetLastSentPacketID`; to find a bad name, map one at a time with a
+  30 ms pause and watch for the exception.
+- Seen in a 36-minute live flight with all of them subscribed: no event fires on its own; a held brake button
+  sends `BRAKES` every frame (1523 times); every pause sends `PAUSE_TOGGLE` plus `PAUSE_OFF`/`PAUSE_ON`;
+  `ENGINE_AUTO_SHUTDOWN` and `THROTTLE_FULL` arrive from keyboard shortcuts. Restarting a flight does not
+  send `None` values: the streamed SimVars jump to the new cockpit state in one packet.
+- `TOGGLE_ALTERNATE_STATIC` flips `ALTERNATE_STATIC_SOURCE_OPEN` (Bool) and is delivered as a notification.
 - Unit facts from this work: `BRAKE_PARKING_POSITION` is `Position` (0..1), `SPOILERS_HANDLE_POSITION` and
   `ELEVATOR_TRIM_PCT` are `Percent Over 100` (0..1, trim signed), `GENERAL_ENG_THROTTLE_LEVER_POSITION:1` is
   `Percent` (0..100), `FLAPS_HANDLE_INDEX` a small integer, `GEAR_HANDLE_POSITION` and the `LIGHT_*`,
   `PITOT_HEAT`, `ELECTRICAL_MASTER_BATTERY`, `GENERAL_ENG_MASTER_ALTERNATOR:1`, `SIM_ON_GROUND` flags are
-  Bool (threshold, do not truth-test).
+  Bool (threshold, do not truth-test). Also streamed fine as FLOAT64: `AVIONICS_MASTER_SWITCH`,
+  `GENERAL_ENG_FUEL_PUMP_SWITCH:1`, `GENERAL_ENG_ANTI_ICE_POSITION:1`, `STRUCTURAL_DEICE_SWITCH`,
+  `PROP_DEICE_SWITCH:1`, `GENERAL_ENG_STARTER:1`, `GENERAL_ENG_COMBUSTION:1` and the `AUTOPILOT_*_HOLD`
+  flags (Bool), `GENERAL_ENG_MIXTURE_LEVER_POSITION:1` / `_PROPELLER_` (`Percent`, 0..100),
+  `KOHLSMAN_SETTING_MB` (millibars, 1013.25), `FUEL_TANK_SELECTOR:1` (enum, 1 = all).
+  `WINDSHIELD_DEICE_SWITCH` is not in the package's table.
 
 ## Testing without the sim
 - Keep `DemoSource` (`x52_simconnect/sources.py`) in step with the pages: every SimVar a page uses must be in

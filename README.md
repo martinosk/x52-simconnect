@@ -98,12 +98,18 @@ each change. Start/Stop and Reset keep their own meaning inside each app.
 ```
 A rolling log of the last 100 cockpit actions, collected in every mode, each line with its age. Two sources:
 - **State changes** in the streaming feed (`event_rules.py`, a table of SimVar, wording and policy): flaps, gear,
-  parking brake, spoilers, trim, throttle, lights, pitot heat, battery, alternator, autopilot modes, heading
-  bug, selected altitude, COM1 active/standby, squawk, airborne/touchdown. Continuous inputs do not spam:
-  trim and the heading bug log once they stop moving for 0.5 s, throttle logs on 5 % steps.
-- **Key events** the sim reports (`sim_events.py`): `FLAPS_INCR`, `GEAR_TOGGLE`, `AP_MASTER`, ... from any
-  source. They only make a line, `EV FLAPS_INCR`, when no state change explains them within 0.3 s, so a press
-  that does nothing (flaps already up) still shows, and normal actions are not logged twice.
+  parking brake, spoilers, trim, throttle, propeller, mixture, starter, engine running, fuel pump and tank,
+  lights, pitot heat, alternate static, anti-ice and de-ice, battery, alternator, avionics, autopilot modes,
+  flight director, yaw damper, heading bug, selected altitude, altimeter setting, COM1 and NAV1
+  active/standby, squawk, airborne/touchdown. Continuous inputs do not spam: trim, the heading bug and the
+  altimeter setting log once they stop moving for 0.5 s, the levers log on 5 % steps. A flight restart,
+  which changes everything at once, is one `12 CHANGES` line.
+- **Key events** the sim reports (`sim_events.py`): every discrete key event Python-SimConnect knows, some
+  700 of them (`FLAPS_INCR`, `GEAR_TOGGLE`, `TOGGLE_ALTERNATE_STATIC`, ...), from any source; not `AXIS_*`
+  and `*_SET` events, which fire continuously, nor pause, view, slew, ATC and multiplayer keys. They only make a
+  line, `EV FLAPS_INCR`, when no state change explains them within 0.3 s, so a press that does nothing
+  (flaps already up) still shows, a switch without a rule of its own shows by its event name, and normal
+  actions are not logged twice.
 
 Buttons: **Start/Stop** = older entries, **Reset** = newer, **Reset held 1 s** = back to the newest. While
 scrolled, new entries do not move the view; `+3 NEW` replaces the age on line 1 instead. Turning the
@@ -135,11 +141,11 @@ Hardware and sim I/O live in three modules; everything else is plain Python that
 | `buttons.py` | Shared-mode HID reader for all 34 buttons and the mode selector (layout from libx52io). | stick |
 | `saitek_driver.py` | Mode selector via Logitech's filter driver, which hides it from HID; recovered from the profiler's own device library. | stick + Logitech driver |
 | `sim_feed.py` | One SimConnect data definition with every SimVar, pushed every 6th visual frame. Hooks the dispatch of the `SimConnect` package, which otherwise ignores bulk data packets and unknown event ids. | sim |
-| `sim_events.py` | Key-event notifications (be told when `FLAPS_INCR` fires anywhere) and sending events. | sim |
+| `sim_events.py` | Key-event notifications (be told when `FLAPS_INCR` fires anywhere; `all_key_events` is the list the bridge subscribes to) and sending events. | sim |
 | `formatting.py` | SimVar value -> display text helpers; all tolerate `None`. | - |
 | `pages.py` | The five pages: their SimVars and 16-character renderings. | - |
-| `event_rules.py` | The event log's rule table (SimVar, wording, change/settled/step policy) and the engine that turns feed values into log lines. | - |
-| `apps.py` | One app per selector position (`PagesApp`, `EventLogApp`, placeholder `CommsApp`) behind one `App` protocol; `ALL_VARS` and `ALL_EVENTS`, the union of what they need. | - |
+| `event_rules.py` | The event log's rule table (SimVar, wording, change/settled/step policy) the engine that turns feed values into log lines, and the filter for which key events are worth a notification. | - |
+| `apps.py` | One app per selector position (`PagesApp`, `EventLogApp`, placeholder `CommsApp`) behind one `App` protocol; `ALL_VARS`, the union of what they need. | - |
 | `display.py` | `Display`: the one writer of MFD text, with the banner, the forced redraw and the current mode. | - |
 | `clock_sync.py` | Firmware clock/date and brightness from sim time. | - |
 | `sources.py` | `SimSource` (live, with reconnect) and `DemoSource` (fake data) behind one `ensure`/`read`/`close` interface. | - |

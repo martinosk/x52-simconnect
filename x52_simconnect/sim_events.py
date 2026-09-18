@@ -20,8 +20,27 @@ from collections import deque
 from SimConnect.Constants import SIMCONNECT_GROUP_PRIORITY_HIGHEST, SIMCONNECT_OBJECT_ID_USER
 from SimConnect.Enum import SIMCONNECT_EVENT_FLAG
 
+from .event_rules import SKIPPED_EVENT_GROUPS, loggable
+
 FIRST_ID = 0x1000  # first client event id; Python-SimConnect numbers its own from 0
 GROUP_ID = 0x1000  # our one notification group
+
+
+def all_key_events():
+    """Every discrete key event in Python-SimConnect's table (EventList.py), minus the groups and names
+    ``event_rules`` rules out: some 700 names. Subscribing to all of them takes ~0.1 s and an idle cockpit
+    sends nothing (seen live), so the event log hears about switches it has no rule for."""
+    from SimConnect import AircraftEvents
+    from SimConnect.EventList import EventHelper
+
+    names = []
+    for group in vars(AircraftEvents).values():  # the nested group classes; AircraftEvents.list omits G1000
+        if not (isinstance(group, type) and issubclass(group, EventHelper)):
+            continue
+        if group.__name__.lstrip("_") in SKIPPED_EVENT_GROUPS:
+            continue
+        names += [entry[0].decode() for entry in group.list]
+    return tuple(dict.fromkeys(name for name in names if loggable(name)))
 
 
 class SimEvents:
@@ -83,10 +102,9 @@ def main(argv=None):
     """Print key events as they fire for 30 s:  python -m x52_simconnect.sim_events [EVENT ...]"""
     import sys
 
-    from .event_rules import KEY_EVENTS
     from .sim_feed import SimFeed
 
-    names = (argv if argv is not None else sys.argv[1:]) or list(KEY_EVENTS)
+    names = (argv if argv is not None else sys.argv[1:]) or list(all_key_events())
     feed = SimFeed(["ZULU_TIME"], events=names)
     feed.connect()
     print(f"subscribed to {len(names)} events; press things in the sim (30 s, Ctrl-C to stop)")

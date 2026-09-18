@@ -89,6 +89,21 @@ Deviations from the text above:
   event within 1 s (a held hat at the trim stop) make one line.
 - Flaps log the handle index (`FLAPS 2`); the surface angle lags the handle, so `FLAPS 2 (10)` would show the
   old angle at the moment of the change.
+- Both sources are wider than the lists above (2026-09-18, after alternate static air made no line). The
+  feed subscribes to every discrete key event in Python-SimConnect's table, not a hand-picked 27:
+  `sim_events.all_key_events()`, filtered by `event_rules.loggable` and `SKIPPED_EVENT_GROUPS` (no `AXIS_*`,
+  `*_SET`, view, slew, ATC, multiplayer or mission keys). So a switch nobody wrote a rule for still shows as
+  `EV NAME`. The rule table gained propeller, mixture, starter, engine running, fuel pump, tank selector,
+  panel/cabin/logo/wing/recognition lights, alternate static (`ALT STATIC` / `NORM STATIC`), anti-ice,
+  de-ice, avionics master, AP APR/BC/IAS/FLC, FD, YD, NAV1 active/standby and the altimeter setting.
+  Verified live: alternate static toggled through SimConnect makes one line each way and no `EV` line.
+- The repeat suppression for unexplained key events is per event name, so two held keys make one line each.
+- From a 36-minute live flight (2026-09-18, 704 subscriptions): nothing fired on its own, a held brake
+  button sent `BRAKES` 1523 times and made 7 lines. Three fixes came out of it. `step()` has hysteresis
+  (`HYSTERESIS`), because a throttle resting on a 5 % boundary logged `THR 85%`, `80%`, `85%` on its own.
+  Four or more lines in one tick collapse into `12 CHANGES` (`BURST_LINES`): restarting a flight swaps the
+  whole cockpit state with no `None` in between. `PAUSE_*` events are not subscribed; every pause sent
+  `PAUSE_TOGGLE` plus `PAUSE_OFF`.
 
 ## Steps
 1. `event_rules.py` + `tests/test_event_rules.py` (no sim).

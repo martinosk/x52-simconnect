@@ -9,6 +9,8 @@ import pytest
 SimConnectEnum = pytest.importorskip("SimConnect.Enum")
 
 from x52_simconnect import sources  # noqa: E402
+from x52_simconnect.event_rules import REJECTED_EVENTS  # noqa: E402
+from x52_simconnect.sim_events import all_key_events  # noqa: E402
 from x52_simconnect.sim_feed import SimFeed  # noqa: E402
 
 NAMES = ["INDICATED_ALTITUDE", "AIRSPEED_INDICATED", "ZULU_TIME"]
@@ -97,7 +99,16 @@ def test_sim_source_passes_events_through(sim_source):
     assert sim_source.events() == []
     sim_source.ensure()
     assert sim_source.events() == ["FLAPS_INCR"]
-    assert sim_source.feed.event_names == list(sources.ALL_EVENTS)
+    assert sim_source.feed.event_names == list(all_key_events())  # the default: every discrete key event
+    assert sources.SimSource(NAMES, events=["GEAR_TOGGLE"]).feed.event_names == ["GEAR_TOGGLE"]
+
+
+def test_all_key_events_is_the_whole_table_minus_the_noise():
+    names = all_key_events()
+    assert len(names) == len(set(names)) > 500
+    assert {"TOGGLE_ALTERNATE_STATIC", "FLAPS_INCR", "AP_MASTER", "PITOT_HEAT_TOGGLE"} <= set(names)
+    assert not {"AXIS_THROTTLE_SET", "THROTTLE_SET", "PAN_LEFT", "SLEW_TOGGLE", "ATC_MENU_1"} & set(names)
+    assert not REJECTED_EVENTS & set(names)
 
 
 def test_sim_source_reconnects_after_stale_data(sim_source):

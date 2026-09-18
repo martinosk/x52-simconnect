@@ -11,7 +11,7 @@ import logging
 from collections import deque
 from itertools import islice
 
-from .event_rules import KEY_EVENTS, RULES, VARS, RuleEngine
+from .event_rules import RULES, VARS, RuleEngine
 from .formatting import age, clip, hms
 from .pages import CLOCK_VARS, PAGES, render
 
@@ -150,7 +150,7 @@ class EventLogApp(App):
         self.showing = False
         self._now = 0.0
         self._pending = {}  # key event name -> time first seen, waiting for a rule to explain it
-        self._last_ev = ("", float("-inf"))
+        self._ev_logged = {}  # key event name -> when it was last logged as EV, or repeated since
         self._held_done = False
 
     # ------------------------------------------------------------------ collecting
@@ -158,8 +158,8 @@ class EventLogApp(App):
         self._now = now
         lines = self.engine.update(values, now)
         for name in events:
-            if name == self._last_ev[0] and now - self._last_ev[1] < self.KEY_EVENT_REPEAT:
-                self._last_ev = (name, now)  # a held hat repeating an event already logged: one line
+            if now - self._ev_logged.get(name, float("-inf")) < self.KEY_EVENT_REPEAT:
+                self._ev_logged[name] = now  # a held hat repeating an event already logged: one line
             else:
                 self._pending.setdefault(name, now)
         if lines or self.engine.settling:
@@ -168,7 +168,7 @@ class EventLogApp(App):
             for name, since in list(self._pending.items()):
                 if now - since >= self.KEY_EVENT_GRACE:
                     del self._pending[name]
-                    self._last_ev = (name, now)
+                    self._ev_logged[name] = now
                     lines.append(f"EV {name}")
         for text in lines:
             self.add(now, text)
@@ -231,8 +231,6 @@ APP_CLASSES = {1: PagesApp, 2: CommsApp, 3: EventLogApp}
 
 # Everything the feed streams, in a stable order and without duplicates: every app's vars plus the clock's.
 ALL_VARS = tuple(dict.fromkeys([n for cls in APP_CLASSES.values() for n in cls.vars] + list(CLOCK_VARS)))
-# The key events the feed subscribes to, for the event log.
-ALL_EVENTS = KEY_EVENTS
 
 
 def build_apps(display, events_banner=False, **pages_options):

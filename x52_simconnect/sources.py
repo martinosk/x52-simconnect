@@ -9,20 +9,21 @@ src.close()
 import math
 import time
 
-from .apps import ALL_EVENTS, ALL_VARS
+from .apps import ALL_VARS
 
 STALE_SECONDS = 15  # no packet for this long -> drop the connection and retry
 RETRY_SECONDS = 5  # how often to try connecting while the sim is down
 
 
 class SimSource:
-    """Streaming feed of ALL_VARS via one SimConnect data definition, plus key-event notifications
-    (see sim_feed.py and sim_events.py)."""
+    """Streaming feed of ALL_VARS via one SimConnect data definition, plus notifications for every discrete
+    key event unless ``events`` names the ones to subscribe to (see sim_feed.py and sim_events.py)."""
 
-    def __init__(self, names=ALL_VARS, events=ALL_EVENTS):
+    def __init__(self, names=ALL_VARS, events=None):
+        from .sim_events import all_key_events
         from .sim_feed import SimFeed  # imports the SimConnect package, Windows-only
 
-        self.feed = SimFeed(names, events=events)
+        self.feed = SimFeed(names, events=all_key_events() if events is None else events)
         self._next_try = 0
 
     @property
@@ -70,17 +71,41 @@ DEMO_COCKPIT = {
     "SPOILERS_HANDLE_POSITION": 0,
     "ELEVATOR_TRIM_PCT": 0,
     "GENERAL_ENG_THROTTLE_LEVER_POSITION:1": 0,
+    "GENERAL_ENG_PROPELLER_LEVER_POSITION:1": 100,
+    "GENERAL_ENG_MIXTURE_LEVER_POSITION:1": 100,
+    "GENERAL_ENG_STARTER:1": 0,
+    "GENERAL_ENG_COMBUSTION:1": 1,
+    "GENERAL_ENG_FUEL_PUMP_SWITCH:1": 0,
+    "FUEL_TANK_SELECTOR:1": 1,
     "LIGHT_LANDING": 0,
     "LIGHT_TAXI": 0,
     "LIGHT_STROBE": 0,
     "LIGHT_NAV": 1,
     "LIGHT_BEACON": 0,
+    "LIGHT_PANEL": 0,
+    "LIGHT_CABIN": 0,
+    "LIGHT_LOGO": 0,
+    "LIGHT_WING": 0,
+    "LIGHT_RECOGNITION": 0,
     "PITOT_HEAT": 0,
+    "ALTERNATE_STATIC_SOURCE_OPEN": 0,
+    "GENERAL_ENG_ANTI_ICE_POSITION:1": 0,
+    "STRUCTURAL_DEICE_SWITCH": 0,
+    "PROP_DEICE_SWITCH:1": 0,
     "ELECTRICAL_MASTER_BATTERY": 0,
     "GENERAL_ENG_MASTER_ALTERNATOR:1": 0,
+    "AVIONICS_MASTER_SWITCH": 1,
     "AUTOPILOT_MASTER": 0,
     "AUTOPILOT_HEADING_LOCK": 0,
     "AUTOPILOT_VERTICAL_HOLD": 0,
+    "AUTOPILOT_APPROACH_HOLD": 0,
+    "AUTOPILOT_BACKCOURSE_HOLD": 0,
+    "AUTOPILOT_AIRSPEED_HOLD": 0,
+    "AUTOPILOT_FLIGHT_LEVEL_CHANGE": 0,
+    "AUTOPILOT_FLIGHT_DIRECTOR_ACTIVE": 0,
+    "AUTOPILOT_YAW_DAMPER": 0,
+    "NAV_STANDBY_FREQUENCY:1": 113.90,
+    "KOHLSMAN_SETTING_MB": 1013.25,
     "SIM_ON_GROUND": 1,
 }
 

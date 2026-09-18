@@ -235,6 +235,25 @@ def test_repeated_key_event_is_one_line_and_a_moving_value_swallows_them():
     assert [text for _, text in app.history] == ["TRIM +7%", "EV ELEV_TRIM_UP"]
 
 
+def test_alternate_static_is_one_worded_line_not_its_key_event():
+    app = event_log()
+    values = demo_values(0)
+    app.observe(values, 1.0)
+    values["ALTERNATE_STATIC_SOURCE_OPEN"] = 1
+    app.observe(values, 1.25, events=["TOGGLE_ALTERNATE_STATIC"])
+    app.observe(values, 2.0)
+    assert [text for _, text in app.history] == ["ALT STATIC"]
+
+
+def test_two_held_key_events_alternating_are_one_line_each():
+    app = event_log()
+    values = demo_values(0)
+    for i in range(8):
+        app.observe(values, 1.0 + 0.25 * i, events=["ELEV_TRIM_UP", "RUDDER_TRIM_LEFT"])
+    app.observe(values, 4.0)
+    assert sorted(text for _, text in app.history) == ["EV ELEV_TRIM_UP", "EV RUDDER_TRIM_LEFT"]
+
+
 def test_mirror_banners_new_entries_only_while_another_app_shows():
     app = event_log(mirror=True)
     app.add(1.0, "GEAR UP")

@@ -9,18 +9,24 @@ state, how a state is worded, and a policy that says when a new state counts:
     step(size, debounce)    quantise to ``size`` first, then settle for ``debounce`` (throttle in 5 % steps)
 
 The first value seen for a SimVar is a baseline, not an event, and so is the first value after the sim
-stopped sending (``None``). Bool SimVars go through ``formatting.flag`` (``> 0.5``), never a truth test.
+stopped sending (``None``). ``BURST_LINES`` or more lines in one tick collapse into one ``12 CHANGES`` line:
+restarting a flight swaps the whole cockpit state at once, with no ``None`` in between (seen live).
+Bool SimVars go through ``formatting.flag`` (``> 0.5``), never a truth test.
 
-``KEY_EVENTS`` lists the discrete key events worth subscribing to as a second source (``sim_events.py``);
-the log shows them as ``EV FLAPS_INCR`` only when no rule explains them (``apps.EventLogApp``).
+Key events are the second source, and the catch-all for whatever has no rule: the feed subscribes to every
+key event Python-SimConnect knows that passes ``loggable`` (``sim_events.all_key_events``), and the log shows
+one as ``EV FLAPS_INCR`` only when no rule explains it (``apps.EventLogApp``).
 """
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
 from .formatting import bcd, flag, freq, num
 
 SETTLE_SECONDS = 0.5  # default for settled() and step(): how long a value must hold still to be logged
+HYSTERESIS = 0.75  # step(): a value leaves its step only once it is this fraction of a step away from it
+BURST_LINES = 4  # this many lines in one tick is a flight restart or respawn, not a hand on a switch
 
 
 # ---------------------------------------------------------------------------------------------- policies
@@ -29,9 +35,13 @@ class Policy:
     settle: float = 0.0  # seconds the new state must hold before it is logged
     size: float = 0.0  # quantisation step, 0 = none
 
-    def quantise(self, state):
+    def quantise(self, state, prev=None):
+        """``state`` rounded to the step size. With ``prev`` (the step it was on) it stays there until it is
+        well clear of it, so a lever resting on a boundary (82.4 %, 82.6 %) does not flap between two steps."""
         if not self.size or not isinstance(state, int | float) or isinstance(state, bool):
             return state
+        if isinstance(prev, int | float) and not isinstance(prev, bool) and abs(state - prev) < self.size * HYSTERESIS:
+            return prev
         return round(state / self.size) * self.size + 0.0  # "+ 0.0" turns -0.0 into 0.0
 
 
@@ -73,6 +83,9 @@ def either(when_true, when_false):
     return lambda on: when_true if on else when_false
 
 
+TANKS = {0: "OFF", 1: "ALL", 2: "LEFT", 3: "RIGHT"}  # FUEL_TANK_SELECTOR enum; the rest show as a number
+
+
 def _alt_sel(feet):
     return f"ALT SEL {feet}" if feet < 10000 else f"ALT SEL{feet}"  # 12 chars either way
 
@@ -84,41 +97,75 @@ RULES = (
     Rule("SPOILERS_HANDLE_POSITION", num, lambda s: f"SPOILER {s * 100:.0f}%", step(0.1, 0)),
     Rule("ELEVATOR_TRIM_PCT", num, lambda s: f"TRIM {s * 100:+.0f}%", step(0.01)),
     Rule("GENERAL_ENG_THROTTLE_LEVER_POSITION:1", num, lambda s: f"THR {s:.0f}%", step(5)),
+    Rule("GENERAL_ENG_PROPELLER_LEVER_POSITION:1", num, lambda s: f"PROP {s:.0f}%", step(5)),
+    Rule("GENERAL_ENG_MIXTURE_LEVER_POSITION:1", num, lambda s: f"MIX {s:.0f}%", step(5)),
+    Rule("GENERAL_ENG_STARTER:1", flag, toggle("STARTER"), change()),
+    Rule("GENERAL_ENG_COMBUSTION:1", flag, either("ENG RUNNING", "ENG STOPPED"), change()),
+    Rule("GENERAL_ENG_FUEL_PUMP_SWITCH:1", flag, toggle("FUEL PMP"), change()),
+    Rule("FUEL_TANK_SELECTOR:1", rint, lambda n: f"TANK {TANKS.get(n, n)}", change()),
     Rule("LIGHT_LANDING", flag, toggle("LDG LTS"), change()),
     Rule("LIGHT_TAXI", flag, toggle("TAXI LTS"), change()),
     Rule("LIGHT_STROBE", flag, toggle("STROBES"), change()),
     Rule("LIGHT_NAV", flag, toggle("NAV LTS"), change()),
     Rule("LIGHT_BEACON", flag, toggle("BEACON"), change()),
+    Rule("LIGHT_PANEL", flag, toggle("PANEL LT"), change()),
+    Rule("LIGHT_CABIN", flag, toggle("CABIN LT"), change()),
+    Rule("LIGHT_LOGO", flag, toggle("LOGO LTS"), change()),
+    Rule("LIGHT_WING", flag, toggle("WING LTS"), change()),
+    Rule("LIGHT_RECOGNITION", flag, toggle("RECOG LT"), change()),
     Rule("PITOT_HEAT", flag, toggle("PITOT HT"), change()),
+    Rule("ALTERNATE_STATIC_SOURCE_OPEN", flag, either("ALT STATIC", "NORM STATIC"), change()),
+    Rule("GENERAL_ENG_ANTI_ICE_POSITION:1", flag, toggle("ANTI ICE"), change()),
+    Rule("STRUCTURAL_DEICE_SWITCH", flag, toggle("DEICE"), change()),
+    Rule("PROP_DEICE_SWITCH:1", flag, toggle("PROP ICE"), change()),
     Rule("ELECTRICAL_MASTER_BATTERY", flag, toggle("BATTERY"), change()),
     Rule("GENERAL_ENG_MASTER_ALTERNATOR:1", flag, toggle("ALTERN"), change()),
+    Rule("AVIONICS_MASTER_SWITCH", flag, toggle("AVIONICS"), change()),
     Rule("AUTOPILOT_MASTER", flag, toggle("AP"), change()),
     Rule("AUTOPILOT_HEADING_LOCK", flag, toggle("AP HDG"), change()),
     Rule("AUTOPILOT_ALTITUDE_LOCK", flag, toggle("AP ALT"), change()),
     Rule("AUTOPILOT_NAV1_LOCK", flag, toggle("AP NAV"), change()),
     Rule("AUTOPILOT_VERTICAL_HOLD", flag, toggle("AP VS"), change()),
+    Rule("AUTOPILOT_APPROACH_HOLD", flag, toggle("AP APR"), change()),
+    Rule("AUTOPILOT_BACKCOURSE_HOLD", flag, toggle("AP BC"), change()),
+    Rule("AUTOPILOT_AIRSPEED_HOLD", flag, toggle("AP IAS"), change()),
+    Rule("AUTOPILOT_FLIGHT_LEVEL_CHANGE", flag, toggle("AP FLC"), change()),
+    Rule("AUTOPILOT_FLIGHT_DIRECTOR_ACTIVE", flag, toggle("FD"), change()),
+    Rule("AUTOPILOT_YAW_DAMPER", flag, toggle("YD"), change()),
     Rule("AUTOPILOT_HEADING_LOCK_DIR", rint, lambda d: f"HDG BUG {d % 360:03d}", settled()),
     Rule("AUTOPILOT_ALTITUDE_LOCK_VAR", rint, _alt_sel, settled()),
     Rule("COM_ACTIVE_FREQUENCY:1", khz, lambda f: f"COM1 {freq(f)}", change()),
     Rule("COM_STANDBY_FREQUENCY:1", khz, lambda f: f"STBY {freq(f)}", change()),
+    Rule("NAV_ACTIVE_FREQUENCY:1", khz, lambda f: f"NAV1 {freq(f)}", change()),
+    Rule("NAV_STANDBY_FREQUENCY:1", khz, lambda f: f"NSBY {freq(f)}", change()),
     Rule("TRANSPONDER_CODE:1", rint, lambda c: f"SQK {bcd(c)}", change()),
+    Rule("KOHLSMAN_SETTING_MB", rint, lambda mb: f"QNH {mb}", settled()),
     Rule("SIM_ON_GROUND", flag, either("TOUCHDOWN", "AIRBORNE"), change()),
 )
 
 VARS = tuple(dict.fromkeys(r.var for r in RULES))
 
-# Discrete key events to be notified about. Never AXIS_* or *_SET events: those fire every frame.
-KEY_EVENTS = (
-    "FLAPS_INCR", "FLAPS_DECR", "FLAPS_UP", "FLAPS_DOWN",
-    "GEAR_TOGGLE", "GEAR_UP", "GEAR_DOWN",
-    "PARKING_BRAKES", "SPOILERS_TOGGLE",
-    "ELEV_TRIM_UP", "ELEV_TRIM_DN",
-    "AP_MASTER", "AP_HDG_HOLD", "AP_ALT_HOLD", "AP_NAV1_HOLD", "AP_VS_HOLD",
-    "AP_PANEL_HEADING_HOLD", "AP_PANEL_ALTITUDE_HOLD",
-    "LANDING_LIGHTS_TOGGLE", "TOGGLE_TAXI_LIGHTS", "STROBES_TOGGLE", "TOGGLE_NAV_LIGHTS", "TOGGLE_BEACON_LIGHTS",
-    "PITOT_HEAT_TOGGLE", "TOGGLE_MASTER_BATTERY", "TOGGLE_MASTER_ALTERNATOR",
-    "COM_STBY_RADIO_SWAP",
-)  # fmt: skip
+# Key events worth a notification. Never AXIS_* or *_SET events: those fire every frame from bound axes.
+# The groups are Python-SimConnect's (EventList.py); these are not cockpit actions, and a hat panning the
+# view would fill the log.
+SKIPPED_EVENT_GROUPS = ("Slew_System", "View_System", "Mission_Keys", "ATC", "Multiplayer")
+# In Python-SimConnect's table, but MSFS 2024 answers NAME_UNRECOGNIZED (seen live, 2026-09).
+REJECTED_EVENTS = frozenset(
+    {
+        "KEY_PRESSURIZATION_PRESSURE_ALT_INC",
+        "KEY_PRESSURIZATION_PRESSURE_ALT_DEC",
+        "PRESSURIZATION_PRESSURE_DUMP_SWTICH",
+    }
+)
+
+
+def loggable(name):
+    """True for a discrete key event the log should be told about."""
+    if not re.fullmatch(r"[A-Z0-9_]+", name):  # the table has placeholder rows named "Not supported"
+        return False
+    continuous = name.startswith("AXIS_") or name.endswith("_SET") or "_SET_" in name
+    sim_control = name.startswith("PAUSE_")  # every pause sends PAUSE_TOGGLE and PAUSE_OFF/ON: two lines of noise
+    return not continuous and not sim_control and name not in REJECTED_EVENTS
 
 
 # ---------------------------------------------------------------------------------------------- engine
@@ -152,7 +199,7 @@ class RuleEngine:
             if raw is None:
                 tracker.logged = tracker.pending = None  # no data: whatever comes next is a new baseline
                 continue
-            state = rule.policy.quantise(rule.key(raw))
+            state = rule.policy.quantise(rule.key(raw), tracker.pending)
             if tracker.logged is None:
                 tracker.logged = tracker.pending = state
                 continue
@@ -161,4 +208,8 @@ class RuleEngine:
             if tracker.pending != tracker.logged and now - tracker.since >= rule.policy.settle:
                 tracker.logged = tracker.pending
                 lines.append(rule.text(tracker.logged))
+        if len(lines) >= BURST_LINES:
+            for tracker in self._trackers.values():
+                tracker.logged = tracker.pending  # and whatever is still settling belongs to the same jump
+            return [f"{len(lines)} CHANGES"]
         return lines
